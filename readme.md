@@ -44,16 +44,48 @@ cd backend
 uv sync
 ```
 
-3. Create your local environment configuration file:
+3. PostgreSQL Local Database Setup:
+
+The backend relies on a local PostgreSQL database server. Follow these steps to provision it using your preferred SQL terminal, pgAdmin, or the `psql` command-line tool:
+
+Step A: Connect to your Postgres Server instance.
+
+Step B: Create the application user.
+
+Run the following command to create a dedicated user account with a secure password (replace placeholders with your desired credentials):
+
+```sql
+CREATE USER <YOUR_DB_USER> WITH PASSWORD '<YOUR_DB_PASSWORD>';
+```
+
+Step C: Create the project database.
+
+Generate the target database that maps directly to your application's `DATABASE_URL`:
+
+```sql
+CREATE DATABASE <YOUR_DB_NAME> OWNER <YOUR_DB_USER>;
+```
+
+Step D: Grant full administration privileges.
+
+Ensure the new user has complete read/write access to manage schema migrations:
+
+```sql
+GRANT ALL PRIVILEGES ON DATABASE <YOUR_DB_NAME> TO <YOUR_DB_USER>;
+```
+
+_Once created, ensure the values you configured above match the `<YOUR_DB_USER>`, `<YOUR_DB_PASSWORD>`, and `<YOUR_DB_NAME>` fields in your backend `.env` file._
+
+4. Create your local environment configuration file:
 
 Create a file named .env inside the backend/ directory and add your local configuration details:
 
 ```Bash
 # Database & Security
-DATABASE_URL="postgresql+asyncpg://homerex:mustha@localhost:5432/stocksphere"
-SECRET_KEY="09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
-# System Path
-REPORT_BASE_PATH="C:\Users\mtamu\Documents\Homerexreports"
+DATABASE_URL="postgresql+asyncpg://<server_name>:<password>@localhost:5432/stocksphere"
+SECRET_KEY="09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7" #Change it for ensure seccurity
+# System Path (This is where your generated reports will be saved)
+REPORT_BASE_PATH="C:\Users\<your_pc>\Documents\Homerexreports" #Or any other location
 # Initial Recovery Admin Credentials
 
 # (Used to provision the system's absolute first administrator account)
@@ -68,6 +100,8 @@ ADMIN_PHONE="<Your Phone>" #Currenlty set to suppoert only Srilankan Format (can
 4. Run the backend development server:
 
 ```Bash
+uv run main.py
+#or
 uv run uvicorn app.main:app --reload
 ```
 
@@ -77,8 +111,25 @@ The backend API documentation will be available locally at: http://127.0.0.1:800
 
 To run the backend test suite with verbose reporting:
 
-```Bash
+Run All Tests in the Project:
+Executes every single test across all files with verbose layout visibility:
+
+```bash
 uv run pytest -v
+```
+
+Run a Specific Test File (Module):
+Isolates and executes only the tests contained inside the user routes file:
+
+```bash
+uv run pytest app/tests/test_user_routes.py -v
+```
+
+Run a Single Specific Function:
+Targets exactly one test case inside a file by filtering with a keyword (`-k`):
+
+```bash
+uv run pytest app/tests/test_user_routes.py -k "test_create_user_success" -v
 ```
 
 ## 🎨 Frontend Setup (Next.js)
