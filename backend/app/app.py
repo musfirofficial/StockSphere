@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from app.database import create_db_and_tables, engine, async_session_maker
 from app.init_admin import AdminService
+from app.seed import seed_database
 
 # Route imports
 from app.routes.v1.user import router as user_router
@@ -32,6 +33,7 @@ async def lifespan(_app: FastAPI):
         else:
             print("✓ Admin already exists")
 
+    await seed_database()
     yield
     # Shutdown
     await engine.dispose()
