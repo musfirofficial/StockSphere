@@ -494,6 +494,8 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                flexWrap: "wrap",
+                gap: 12,
                 flexShrink: 0,
               }}
             >
@@ -529,6 +531,11 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                   {activeItem.key === "purchase_orders" && `Purchase Orders Management`}
                 </p>
               </div>
+              {headerActions && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {headerActions}
+                </div>
+              )}
             </div>
           )}
 

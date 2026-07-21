@@ -2,7 +2,17 @@ import enum
 import uuid
 from datetime import datetime, timezone, date, timedelta
 from decimal import Decimal
-from sqlalchemy import String, ForeignKey, Integer, Text, DateTime, Date, Enum, Numeric
+from sqlalchemy import (
+    String,
+    ForeignKey,
+    Integer,
+    Text,
+    DateTime,
+    Date,
+    Enum,
+    Numeric,
+    Index,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
@@ -21,12 +31,12 @@ class UserRole(enum.Enum):
 
 # -------------------------- Enums for report types -------------------------- #
 class ReportType(enum.Enum):
-    OVERALL_SUMMARY = "Overall Summary"
-    LOW_STOCK = "Low Stock"
-    TRANSACTION = "Transaction"
-    STOCK_MOVEMENT = "Stock Movement"
-    CATEGORY_WISE = "Category-wise"
-    SUPPLIER = "Supplier"
+    OVERALL_SUMMARY = "OVERALL_SUMMARY"
+    LOW_STOCK = "LOW_STOCK"
+    TRANSACTION = "TRANSACTION"
+    STOCK_MOVEMENT = "STOCK_MOVEMENT"
+    CATEGORY_WISE = "CATEGORY_WISE"
+    SUPPLIER = "SUPPLIER"
 
 
 # ----------------------- Enums for report file formats ---------------------- #
@@ -215,8 +225,9 @@ class Report(Base):
     )
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
-    file_format: Mapped[FileFormat] = mapped_column(Enum(FileFormat), nullable=False)
-    file_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_format: Mapped[FileFormat] = mapped_column(
+        Enum(FileFormat), nullable=False, default=FileFormat.PDF
+    )
 
     # Realtionships
     user: Mapped["User | None"] = relationship("User", back_populates="reports")
@@ -291,12 +302,19 @@ class Item(Base):
 
     __tablename__ = "items"
 
+    __table_args__ = (
+        Index(
+            "idx_items_report_summary",
+            "is_active",
+            "quantity_in_stock",
+            "cost_price",
+            "selling_price",
+        ),
+    )
     item_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    item_name: Mapped[str] = mapped_column(
-        String(100), nullable=False, unique=True, index=True
-    )
+    item_name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     sku: Mapped[str] = mapped_column(
         String(50), nullable=False, unique=True, index=True
     )
@@ -323,7 +341,7 @@ class Item(Base):
         Integer, nullable=False, default=10, index=True
     )
     reorder_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
-    is_active: Mapped[bool] = mapped_column(default=True)
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(local_tz)
     )
@@ -360,6 +378,15 @@ class Transaction(Base):
 
     __tablename__ = "transactions"
 
+    __table_args__ = (
+        Index(
+            "idx_transactions_date_range_lookup",
+            "transaction_date",
+            "transaction_type",
+            "item_id",
+        ),
+    )
+
     transaction_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
@@ -392,6 +419,16 @@ class Transaction(Base):
 class StockAlert(Base):
 
     __tablename__ = "stock_alerts"
+
+    __table_args__ = (
+        Index(
+            "idx_stock_alerts_metrics_lookup",
+            "status",
+            "created_at",
+            "supplier_id",
+            "resolved_at",
+        ),
+    )
 
     alert_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
