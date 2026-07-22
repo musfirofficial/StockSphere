@@ -92,27 +92,46 @@ function StatCard({ label, value, sub, icon: Icon, tone, c }: StatCardProps) {
   );
 }
 
-const topItems = [
-  { name: "Steel Hex Bolts", units: 1240 },
-  { name: "Copper Wire", units: 980 },
-  { name: "LED Panel 18W", units: 760 },
-  { name: "PVC Conduit", units: 640 },
-  { name: "Industrial Gloves", units: 510 },
-];
+function parseTxDate(dateStr: string): Date {
+  const now = new Date();
+  const d = new Date(now);
 
-const salesTrend = [
-  { day: "Mon", value: 4200 },
-  { day: "Tue", value: 3800 },
-  { day: "Wed", value: 5100 },
-  { day: "Thu", value: 4700 },
-  { day: "Fri", value: 6200 },
-  { day: "Sat", value: 5400 },
-  { day: "Sun", value: 3300 },
-];
+  if (!dateStr) return d;
+
+  if (dateStr.startsWith("Today")) {
+    return d;
+  }
+
+  if (dateStr.startsWith("Yesterday")) {
+    d.setDate(d.getDate() - 1);
+    return d;
+  }
+
+  const parts = dateStr.split(" ");
+  if (parts.length >= 2) {
+    const day = parseInt(parts[0], 10);
+    const monthName = parts[1];
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthIndex = months.indexOf(monthName);
+
+    if (monthIndex !== -1) {
+      d.setMonth(monthIndex);
+      d.setDate(day);
+      return d;
+    }
+  }
+
+  const parsed = Date.parse(dateStr);
+  if (!isNaN(parsed)) {
+    return new Date(parsed);
+  }
+
+  return d;
+}
 
 export default function DashboardOverview() {
   const { c } = useTheme();
-  const { transactionList, userList, supplierList } = useData();
+  const { transactionList, userList, supplierList, itemList } = useData();
   const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -125,6 +144,68 @@ export default function DashboardOverview() {
   }, []);
 
   const recentTxs = transactionList.slice(0, 5);
+
+  // Dynamic calculations for StatCards
+  const totalStockQty = itemList.reduce((acc, item) => acc + item.quantity, 0);
+  const totalStockValue = itemList.reduce((acc, item) => acc + item.quantity * item.costPrice, 0);
+
+  const activeAlertsCount = itemList.filter(item => item.active && item.quantity <= item.reorderLevel).length;
+  const outOfStockCount = itemList.filter(item => item.active && item.quantity === 0).length;
+  const lowStockCount = activeAlertsCount - outOfStockCount;
+
+  const stockOuts = transactionList.filter(t => t.type === "Stock out" || t.qty < 0);
+  const totalSoldUnits = stockOuts.reduce((acc, t) => acc + Math.abs(t.qty), 0);
+  const distinctSKUs = new Set(stockOuts.map(t => t.item)).size;
+  const totalSoldValue = stockOuts.reduce((acc, t) => {
+    const item = itemList.find(i => i.itemName === t.item);
+    const price = item ? item.sellingPrice : 0;
+    return acc + Math.abs(t.qty) * price;
+  }, 0);
+
+  // Dynamically calculate top items from transactionList (Stock out)
+  const topItems = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    transactionList.forEach((t) => {
+      if (t.type === "Stock out" || t.qty < 0) {
+        const qty = Math.abs(t.qty);
+        counts[t.item] = (counts[t.item] || 0) + qty;
+      }
+    });
+    return Object.entries(counts)
+      .map(([name, units]) => ({ name, units }))
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 5);
+  }, [transactionList]);
+
+  // Dynamically calculate sales trend for last 7 days
+  const salesTrend = React.useMemo(() => {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const result = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return {
+        day: days[d.getDay()],
+        dateStr: d.toDateString(),
+        value: 0,
+      };
+    });
+
+    transactionList.forEach((t) => {
+      if (t.type === "Stock out" || t.qty < 0) {
+        const txDate = parseTxDate(t.date);
+        const item = itemList.find((i) => i.itemName === t.item);
+        const price = item ? item.sellingPrice : 0;
+        const val = Math.abs(t.qty) * price;
+
+        const match = result.find((r) => new Date(r.dateStr).toDateString() === txDate.toDateString());
+        if (match) {
+          match.value += val;
+        }
+      }
+    });
+
+    return result.map(({ day, value }) => ({ day, value }));
+  }, [transactionList, itemList]);
 
   return (
     <div>
@@ -141,23 +222,23 @@ export default function DashboardOverview() {
         <StatCard
           c={c}
           label="Items in stock"
-          value="8,420"
-          sub="Rs 184,250 value"
+          value={totalStockQty.toLocaleString()}
+          sub={`Rs ${totalStockValue.toLocaleString()} value`}
           icon={Boxes}
           tone="accent"
         />
         <StatCard
           c={c}
           label="Active alerts"
-          value="12"
-          sub="9 low stock · 3 expiring"
+          value={activeAlertsCount.toString()}
+          sub={`${lowStockCount} low stock · ${outOfStockCount} out of stock`}
           icon={AlertTriangle}
           tone="warn"
         />
         <StatCard
           c={c}
           label="Draft POs"
-          value="6"
+          value="0"
           sub="Awaiting approval"
           icon={ClipboardList}
           tone="accent"
@@ -165,8 +246,8 @@ export default function DashboardOverview() {
         <StatCard
           c={c}
           label="Sold value (month)"
-          value="Rs 96,400"
-          sub="312 units across 48 SKUs"
+          value={`Rs ${totalSoldValue.toLocaleString()}`}
+          sub={`${totalSoldUnits} units across ${distinctSKUs} items`}
           icon={Wallet}
           tone="accent"
         />

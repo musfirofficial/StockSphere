@@ -76,7 +76,11 @@ function InputField({
       {Icon && (
         <Icon
           size={15}
-          style={{ color: focused ? c.accent : c.textFaint, flexShrink: 0, transition: "color .15s" }}
+          style={{
+            color: focused ? c.accent : c.textFaint,
+            flexShrink: 0,
+            transition: "color .15s",
+          }}
         />
       )}
       <input
@@ -121,7 +125,9 @@ function Toast({
         padding: "10px 14px",
         borderRadius: 9,
         background: type === "success" ? c.accentSoft : c.dangerSoft,
-        border: `1px solid ${type === "success" ? c.accent + "33" : c.danger + "33"}`,
+        border: `1px solid ${
+          type === "success" ? c.accent + "33" : c.danger + "33"
+        }`,
         color: type === "success" ? c.accent : c.danger,
         fontSize: 13,
         fontWeight: 500,
@@ -156,7 +162,10 @@ export default function ProfilePage() {
     phone: "",
     nic: "",
   });
-  const [profileMsg, setProfileMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [profileMsg, setProfileMsg] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [profileDirty, setProfileDirty] = useState(false);
 
   // ── Password change state ──
@@ -168,7 +177,10 @@ export default function ProfilePage() {
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [passwordMsg, setPasswordMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [passwordMsg, setPasswordMsg] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   // Populate form when user loads
   useEffect(() => {
@@ -211,9 +223,12 @@ export default function ProfilePage() {
       return;
     }
 
-    const updatedUser = { ...currentUser, ...profileForm } as import("../DataContext").User;
+    const updatedUser = {
+      ...currentUser,
+      ...profileForm,
+    } as import("../DataContext").User;
     saveUserEdit(updatedUser);
-    localStorage.setItem("user", JSON.stringify(updatedUser));
+    sessionStorage.setItem("user", JSON.stringify(updatedUser));
     setCurrentUser(updatedUser);
 
     setProfileMsg({ type: "success", text: "Profile updated successfully." });
@@ -224,7 +239,10 @@ export default function ProfilePage() {
   // ── Save password ──
   const handleChangePassword = () => {
     if (!passwordForm.oldPassword) {
-      setPasswordMsg({ type: "error", text: "Please enter your current password." });
+      setPasswordMsg({
+        type: "error",
+        text: "Please enter your current password.",
+      });
       clearPasswordMsg();
       return;
     }
@@ -234,7 +252,10 @@ export default function ProfilePage() {
       return;
     }
     if (passwordForm.newPassword.length < 6) {
-      setPasswordMsg({ type: "error", text: "New password must be at least 6 characters." });
+      setPasswordMsg({
+        type: "error",
+        text: "New password must be at least 6 characters.",
+      });
       clearPasswordMsg();
       return;
     }
@@ -244,14 +265,20 @@ export default function ProfilePage() {
       return;
     }
     if (passwordForm.newPassword === passwordForm.oldPassword) {
-      setPasswordMsg({ type: "error", text: "New password must differ from the current one." });
+      setPasswordMsg({
+        type: "error",
+        text: "New password must differ from the current one.",
+      });
       clearPasswordMsg();
       return;
     }
 
-    const updatedUser = { ...currentUser, password: passwordForm.newPassword } as import("../DataContext").User;
+    const updatedUser = {
+      ...currentUser,
+      password: passwordForm.newPassword,
+    } as import("../DataContext").User;
     saveUserEdit(updatedUser);
-    localStorage.setItem("user", JSON.stringify(updatedUser));
+    sessionStorage.setItem("user", JSON.stringify(updatedUser));
     setCurrentUser(updatedUser);
 
     setPasswordForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
@@ -333,9 +360,12 @@ export default function ProfilePage() {
     opacity: disabled ? 0.6 : 1,
   });
 
-  const passwordStrength = (pwd: string): { label: string; color: string; width: string } => {
+  const passwordStrength = (
+    pwd: string
+  ): { label: string; color: string; width: string } => {
     if (!pwd) return { label: "", color: "transparent", width: "0%" };
-    if (pwd.length < 6) return { label: "Too short", color: c.danger, width: "20%" };
+    if (pwd.length < 6)
+      return { label: "Too short", color: c.danger, width: "20%" };
     let score = 0;
     if (pwd.length >= 8) score++;
     if (/[A-Z]/.test(pwd)) score++;
@@ -372,8 +402,14 @@ export default function ProfilePage() {
     <>
       <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
 
-      <div style={{ maxWidth: 760, display: "flex", flexDirection: "column", gap: 20 }}>
-
+      <div
+        style={{
+          maxWidth: 760,
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+        }}
+      >
         {/* ── Avatar / Greeting card ── */}
         <div
           style={{
@@ -405,7 +441,9 @@ export default function ProfilePage() {
             {getInitials(currentUser.fullName || "U")}
           </div>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: c.text }}>{currentUser.fullName}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: c.text }}>
+              {currentUser.fullName}
+            </div>
             <div style={{ fontSize: 13, color: c.textMuted, marginTop: 2 }}>
               @{currentUser.username} · {currentUser.role}
             </div>
@@ -436,8 +474,17 @@ export default function ProfilePage() {
             </div>
           </div>
           <div style={{ marginLeft: "auto", textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: c.textFaint, fontWeight: 500 }}>ACCOUNT ID</div>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: c.textMuted, marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: c.textFaint, fontWeight: 500 }}>
+              ACCOUNT ID
+            </div>
+            <div
+              style={{
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: c.textMuted,
+                marginTop: 2,
+              }}
+            >
               {currentUser.id}
             </div>
             <div style={{ fontSize: 11, color: c.textFaint, marginTop: 6 }}>
@@ -463,8 +510,12 @@ export default function ProfilePage() {
               <User size={16} color={c.accent} />
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: c.text }}>Personal Details</div>
-              <div style={{ fontSize: 12, color: c.textFaint }}>Update your personal information</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: c.text }}>
+                Personal Details
+              </div>
+              <div style={{ fontSize: 12, color: c.textFaint }}>
+                Update your personal information
+              </div>
             </div>
           </div>
 
@@ -535,11 +586,17 @@ export default function ProfilePage() {
             </div>
             <div>
               <FieldLabel label="Account Status" c={c} />
-              <InputField value={currentUser.active ? "Active" : "Inactive"} c={c} disabled />
+              <InputField
+                value={currentUser.active ? "Active" : "Inactive"}
+                c={c}
+                disabled
+              />
             </div>
           </div>
 
-          {profileMsg && <Toast type={profileMsg.type} message={profileMsg.text} c={c} />}
+          {profileMsg && (
+            <Toast type={profileMsg.type} message={profileMsg.text} c={c} />
+          )}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
             <button
@@ -595,7 +652,9 @@ export default function ProfilePage() {
               <ShieldCheck size={16} color={c.warn} />
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: c.text }}>Change Password</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: c.text }}>
+                Change Password
+              </div>
               <div style={{ fontSize: 12, color: c.textFaint }}>
                 Keep your account secure with a strong password
               </div>
@@ -670,7 +729,9 @@ export default function ProfilePage() {
                 type={showConfirm ? "text" : "password"}
                 icon={Lock}
                 c={c}
-                rightElement={eyeBtn(showConfirm, () => setShowConfirm((v) => !v))}
+                rightElement={eyeBtn(showConfirm, () =>
+                  setShowConfirm((v) => !v)
+                )}
               />
               {/* Match indicator */}
               {passwordForm.confirmPassword && (
@@ -693,13 +754,12 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {passwordMsg && <Toast type={passwordMsg.type} message={passwordMsg.text} c={c} />}
+          {passwordMsg && (
+            <Toast type={passwordMsg.type} message={passwordMsg.text} c={c} />
+          )}
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button
-              onClick={handleChangePassword}
-              style={saveBtnStyle(false)}
-            >
+            <button onClick={handleChangePassword} style={saveBtnStyle(false)}>
               <Lock size={14} />
               Update Password
             </button>

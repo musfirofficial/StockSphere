@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
 import { useData, User } from "../DataContext";
+import { apiFetch } from "@/lib/api";
 
 // ── Checkbox ───────────────────────────────────────────────
 function Cb({
@@ -209,7 +210,7 @@ const inp = (c: any) => ({
 // ── Create Modal ───────────────────────────────────────────
 interface CreateModalProps {
   onClose: () => void;
-  onSave: (u: Partial<User>) => void;
+  onSave: (u: Partial<User>) => Promise<void> | void;
   c: any;
 }
 function CreateModal({ onClose, onSave, c }: CreateModalProps) {
@@ -225,7 +226,7 @@ function CreateModal({ onClose, onSave, c }: CreateModalProps) {
 
   const ROLES = ["Admin", "Manager", "Staff", "Auditor"];
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setError("");
     if (
       !fullName.trim() ||
@@ -242,16 +243,20 @@ function CreateModal({ onClose, onSave, c }: CreateModalProps) {
       setError("Passwords do not match.");
       return;
     }
-    onSave({
-      fullName,
-      username,
-      nic,
-      email,
-      phone,
-      password,
-      role,
-      active: true
-    });
+    try {
+      await onSave({
+        fullName,
+        username,
+        nic,
+        email,
+        phone,
+        password,
+        role,
+        active: true
+      });
+    } catch (err: any) {
+      setError(err.message || "Failed to create user");
+    }
   };
 
   return (
@@ -464,7 +469,7 @@ function DeleteModal({ user, onClose, onConfirm, c }: DeleteModalProps) {
 // ── Main Page Component ─────────────────────────────────────
 export default function UsersPage() {
   const { mode, c } = useTheme();
-  const { userList, setHeaderActions, addUser, saveUserEdit, deleteUser } = useData();
+  const { userList, setUserList, setHeaderActions, addUser, saveUserEdit, deleteUser } = useData();
 
   // Selected for checkbox bulk actions
   const [selected, setSelected] = useState<string[]>([]);
@@ -578,39 +583,107 @@ export default function UsersPage() {
     }
   };
 
-  const handleSaveEdit = (form: Partial<User>) => {
-    setEditError("");
-    if (!form.fullName?.trim() || !form.username?.trim() || !form.nic?.trim() || !form.email?.trim() || !form.phone?.trim()) {
-      setEditError("All core user profile fields are required.");
-      return;
+  // Fetch real users from backend
+  const loadUsersFromBackend = async () => {
+    try {
+      const data = await apiFetch<any[]>("/users/");
+      const mapped: User[] = data.map((u: any) => ({
+        id: u.user_id,
+        fullName: u.full_name,
+        username: u.user_name,
+        nic: u.nic,
+        email: u.email,
+        phone: u.phone,
+        password: "",
+        role: u.role === "Inventory Manager" ? "Manager" : u.role === "Sales" ? "Staff" : u.role,
+        active: u.is_active,
+        createdAt: u.created_at,
+        updatedAt: u.updated_at,
+      }));
+      setUserList(mapped);
+    } catch (err: any) {
+      console.error("Failed to load users from backend:", err);
     }
-
-    // Password validation if they fill any field
-    if (passwordForm.currentPassword || passwordForm.newPassword) {
-      if (passwordForm.currentPassword !== selectedUser?.password) {
-        setEditError("Current password verification failed.");
-        return;
-      }
-      if (!passwordForm.newPassword || passwordForm.newPassword.length < 4) {
-        setEditError("New password must be at least 4 characters long.");
-        return;
-      }
-      form.password = passwordForm.newPassword;
-    }
-
-    saveUserEdit(form);
-    setSelectedUser(form as User);
-    setIsEditingUser(false);
   };
 
-  const handleDeleteConfirm = () => {
-    if (!userToDelete) return;
-    deleteUser(userToDelete.id);
-    setSelected((prev) => prev.filter((x) => x !== userToDelete.id));
-    if (selectedUser?.id === userToDelete.id) {
-      setSelectedUser(null);
+  useEffect(() => {
+    loadUsersFromBackend();
+  }, []);
+
+  const handleCreateUser = async (u: Partial<User>) => {
+    const roleMap: Record<string, string> = {
+      Admin: "Admin",
+      Manager: "Inventory Manager",
+      Staff: "Sales",
+      Auditor: "Auditor",
+    };
+
+    await apiFetch("/users/", {
+      method: "POST",
+      body: JSON.stringify({
+        full_name: u.fullName,
+        user_name: u.username,
+        nic: u.nic,
+        email: u.email,
+        phone: u.phone,
+        password: u.password,
+        role: roleMap[u.role || "Staff"] || "Sales",
+      }),
+    });
+
+    setAddOpen(false);
+    loadUsersFromBackend();
+  };
+
+  const handleSaveEdit = async (form: Partial<User>) => {
+    setEditError("");
+    if (!selectedUser) return;
+
+    try {
+      // 1. Update Profile Info
+      await apiFetch(`/users/${selectedUser.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          full_name: form.fullName,
+          user_name: form.username,
+          nic: form.nic,
+          email: form.email,
+          phone: form.phone,
+          is_active: form.active,
+        }),
+      });
+
+      // 2. Update Password if provided
+      if (passwordForm.newPassword) {
+        await apiFetch(`/users/${selectedUser.id}/password`, {
+          method: "PUT",
+          body: JSON.stringify({
+            current_password: passwordForm.currentPassword || undefined,
+            new_password: passwordForm.newPassword,
+          }),
+        });
+      }
+
+      setIsEditingUser(false);
+      loadUsersFromBackend();
+    } catch (err: any) {
+      setEditError(err.message || "Failed to update user");
     }
-    setUserToDelete(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!userToDelete) return;
+    try {
+      await apiFetch(`/users/${userToDelete.id}`, { method: "DELETE" });
+      setSelected((prev) => prev.filter((x) => x !== userToDelete.id));
+      if (selectedUser?.id === userToDelete.id) {
+        setSelectedUser(null);
+      }
+      setUserToDelete(null);
+      loadUsersFromBackend();
+    } catch (err: any) {
+      alert(err.message || "Failed to delete user");
+    }
   };
 
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -1338,11 +1411,7 @@ export default function UsersPage() {
       {addOpen && (
         <CreateModal
           onClose={() => setAddOpen(false)}
-          onSave={(u) => {
-            addUser(u);
-            setAddOpen(false);
-            setPage(1);
-          }}
+          onSave={handleCreateUser}
           c={c}
         />
       )}

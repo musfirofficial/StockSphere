@@ -51,8 +51,8 @@ export default function LoginPage() {
       setMode("dark");
     }
 
-    // Redirect if already logged in
-    if (localStorage.getItem("isLoggedIn") === "true") {
+    // sessionStorage is per-tab, so this only matters within the same tab session
+    if (sessionStorage.getItem("isLoggedIn") === "true") {
       router.push("/dashboard");
     }
   }, [router]);
@@ -63,7 +63,7 @@ export default function LoginPage() {
     localStorage.setItem("theme-mode", nextMode);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -74,31 +74,64 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    // Mock login verification
-    setTimeout(() => {
-      if (
-        (username.toLowerCase() === "admin" && password === "admin") ||
-        (username.toLowerCase() === "ravindu" && password === "password123") ||
-        (username.toLowerCase() === "manager" && password === "manager123")
-      ) {
-        localStorage.setItem("isLoggedIn", "true");
-        localStorage.setItem(
+    try {
+      // 1. Prepare form data
+      const formData = new URLSearchParams();
+      formData.append("username", username.trim());
+      formData.append("password", password);
+
+      // 2. Call your FastAPI backend endpoint
+      const response = await fetch("http://localhost:8000/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      // 3. Handle unsuccessful login
+      if (!response.ok) {
+        const errorMessage =
+          typeof data.detail === "string"
+            ? data.detail
+            : data.detail?.[0]?.msg || "Login failed. Please try again.";
+        setError(errorMessage);
+        return;
+      }
+
+      // 4. sessionStorage instead of localStorage — cleared on tab/browser close
+      sessionStorage.setItem("access_token", data.access_token);
+      sessionStorage.setItem("refresh_token", data.refresh_token);
+      sessionStorage.setItem("isLoggedIn", "true");
+
+      try {
+        const payloadBase64 = data.access_token.split(".")[1];
+        const decodedPayload = JSON.parse(atob(payloadBase64));
+        sessionStorage.setItem(
           "user",
           JSON.stringify({
-            username: username.toLowerCase(),
-            fullName:
-              username.toLowerCase() === "admin"
-                ? "System Administrator"
-                : "Ravindu Fernando",
-            role: username.toLowerCase() === "admin" ? "Admin" : "Manager",
+            userId: decodedPayload.sub,
+            fullName: decodedPayload.full_name,
+            role: decodedPayload.role,
           })
         );
-        router.push("/dashboard");
-      } else {
-        setError("Invalid username or password. Try admin/admin");
-        setLoading(false);
+      } catch {
+        // Fallback if payload decoding fails
+        sessionStorage.setItem(
+          "user",
+          JSON.stringify({ username: username.toLowerCase() })
+        );
       }
-    }, 800);
+
+      // 5. Redirect to dashboard
+      router.push("/dashboard");
+    } catch (err) {
+      setError("Unable to connect to the server.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!isMounted) return null;
@@ -249,7 +282,7 @@ export default function LoginPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter admin or ravindu"
+                placeholder="Enter username"
                 style={{
                   width: "100%",
                   padding: "11px 12px 11px 38px",
@@ -297,7 +330,7 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password (e.g. admin)"
+                placeholder="Enter password"
                 style={{
                   width: "100%",
                   padding: "11px 40px 11px 38px",
@@ -357,21 +390,7 @@ export default function LoginPage() {
         </form>
       </div>
 
-      <div
-        style={{
-          marginTop: 24,
-          fontSize: 12.5,
-          color: c.textMuted,
-          textAlign: "center",
-        }}
-      >
-        <p>
-          Demo accounts: <strong>admin</strong> / <strong>admin</strong> (Admin)
-        </p>
-        <p style={{ marginTop: 4 }}>
-          or <strong>ravindu</strong> / <strong>password123</strong> (Manager)
-        </p>
-      </div>
+      {/* Helper text removed */}
     </div>
   );
 }

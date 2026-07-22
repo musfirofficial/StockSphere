@@ -21,29 +21,78 @@ import {
   Moon,
   X,
   ArrowLeftRight,
-  Bell
+  Bell,
 } from "lucide-react";
 import { ThemeProvider, useTheme } from "./ThemeContext";
 import { DataProvider, useData } from "./DataContext";
 
 const NAV_MAIN = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutGrid, path: "/dashboard" },
+  {
+    key: "dashboard",
+    label: "Dashboard",
+    icon: LayoutGrid,
+    path: "/dashboard",
+  },
   { key: "users", label: "Users", icon: Users, path: "/dashboard/users" },
-  { key: "categories", label: "Categories", icon: Tags, path: "/dashboard/categories" },
-  { key: "suppliers", label: "Suppliers", icon: Truck, path: "/dashboard/suppliers" },
+  {
+    key: "categories",
+    label: "Categories",
+    icon: Tags,
+    path: "/dashboard/categories",
+  },
+  {
+    key: "suppliers",
+    label: "Suppliers",
+    icon: Truck,
+    path: "/dashboard/suppliers",
+  },
   { key: "items", label: "Items", icon: Boxes, path: "/dashboard/items" },
-  { key: "transactions", label: "Transactions", icon: ArrowLeftRight, path: "/dashboard/transactions" },
-  { key: "stock_alerts", label: "Stock alerts", icon: Bell, path: "/dashboard/stock_alerts" },
-  { key: "purchase_orders", label: "Purchase orders", icon: ClipboardList, path: "/dashboard/purchase_orders" },
-  { key: "reports", label: "Reports", icon: FileBarChart2, path: "/dashboard/reports" },
-  { key: "audit_logs", label: "Audit logs", icon: ShieldCheck, path: "/dashboard/audit_logs" },
+  {
+    key: "transactions",
+    label: "Transactions",
+    icon: ArrowLeftRight,
+    path: "/dashboard/transactions",
+  },
+  {
+    key: "stock_alerts",
+    label: "Stock alerts",
+    icon: Bell,
+    path: "/dashboard/stock_alerts",
+  },
+  {
+    key: "purchase_orders",
+    label: "Purchase orders",
+    icon: ClipboardList,
+    path: "/dashboard/purchase_orders",
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    icon: FileBarChart2,
+    path: "/dashboard/reports",
+  },
+  {
+    key: "audit_logs",
+    label: "Audit logs",
+    icon: ShieldCheck,
+    path: "/dashboard/audit_logs",
+  },
 ];
 
 const NAV_BOTTOM = [
-  { key: "profile", label: "Profile", icon: UserCircle, path: "/dashboard/profile" }
+  {
+    key: "profile",
+    label: "Profile",
+    icon: UserCircle,
+    path: "/dashboard/profile",
+  },
 ];
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <ThemeProvider>
       <DataProvider>
@@ -53,11 +102,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   );
 }
 
-function NavItem({ item, collapsed, c }: { item: any; collapsed: boolean; c: any }) {
+function NavItem({
+  item,
+  collapsed,
+  c,
+}: {
+  item: any;
+  collapsed: boolean;
+  c: any;
+}) {
   const pathname = usePathname();
   const active = pathname === item.path;
   const Icon = item.icon;
-  
+
   return (
     <Link
       href={item.path}
@@ -97,7 +154,14 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { mode, c, toggleTheme } = useTheme();
-  const { userList, supplierList, transactionList, headerActions, loggedInUser, setLoggedInUser } = useData();
+  const {
+    userList,
+    supplierList,
+    transactionList,
+    headerActions,
+    loggedInUser,
+    setLoggedInUser,
+  } = useData();
 
   const [collapsed, setCollapsed] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -108,12 +172,12 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Auth check
-    const logged = localStorage.getItem("isLoggedIn");
+    const logged = sessionStorage.getItem("isLoggedIn");
     if (logged !== "true") {
       router.push("/");
     } else {
       setIsLoggedIn(true);
-      const userStr = localStorage.getItem("user");
+      const userStr = sessionStorage.getItem("user");
       if (userStr) {
         setLoggedInUser(JSON.parse(userStr));
       }
@@ -134,8 +198,8 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   const handleLogout = () => {
-    localStorage.removeItem("isLoggedIn");
-    localStorage.removeItem("user");
+    sessionStorage.removeItem("isLoggedIn");
+    sessionStorage.removeItem("user");
     router.push("/");
   };
 
@@ -157,7 +221,9 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   }
 
   // Find active item configuration
-  const activeItem = [...NAV_MAIN, ...NAV_BOTTOM].find((item) => item.path === pathname) || {
+  const activeItem = [...NAV_MAIN, ...NAV_BOTTOM].find(
+    (item) => item.path === pathname
+  ) || {
     key: "dashboard",
     label: "Dashboard",
   };
@@ -442,39 +508,44 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                   {activeItem.key === "users"
                     ? "Users"
                     : activeItem.key === "suppliers"
-                      ? "Suppliers"
-                      : activeItem.key === "transactions"
-                        ? "Transactions"
-                        : activeItem.key === "stock_alerts"
-                          ? "Stock Alerts"
-                          : activeItem.key === "purchase_orders"
-                            ? "Purchase Orders"
-                            : activeItem.key === "items"
-                              ? "Inventory"
-                              : activeItem.key === "categories"
-                                ? "Categories"
-                                : activeItem.key === "reports"
-                                  ? "Reports"
-                                  : activeItem.key === "audit_logs"
-                                    ? "Audit Logs"
-                                    : activeItem.key === "profile"
-                                      ? "Profile"
-                                      : "Welcome back, " + (loggedInUser?.fullName?.split(" ")[0] || "Ravindu")}
+                    ? "Suppliers"
+                    : activeItem.key === "transactions"
+                    ? "Transactions"
+                    : activeItem.key === "stock_alerts"
+                    ? "Stock Alerts"
+                    : activeItem.key === "purchase_orders"
+                    ? "Purchase Orders"
+                    : activeItem.key === "items"
+                    ? "Inventory"
+                    : activeItem.key === "categories"
+                    ? "Categories"
+                    : activeItem.key === "reports"
+                    ? "Reports"
+                    : activeItem.key === "audit_logs"
+                    ? "Audit Logs"
+                    : activeItem.key === "profile"
+                    ? "Profile"
+                    : "Welcome back, " +
+                      (loggedInUser?.fullName?.split(" ")[0] || "Ravindu")}
                 </div>
                 <div style={{ fontSize: 13, color: c.textMuted, marginTop: 2 }}>
                   {activeItem.key === "users"
-                    ? `${userList.length} accounts · ${userList.filter((u) => u.active).length} active`
+                    ? `${userList.length} accounts · ${
+                        userList.filter((u) => u.active).length
+                      } active`
                     : activeItem.key === "suppliers"
-                      ? `${supplierList.length} suppliers · ${supplierList.filter((s) => s.active).length} active`
-                      : activeItem.key === "transactions"
-                        ? `${transactionList.length} total records`
-                        : activeItem.key === "stock_alerts"
-                          ? "Monitor items below safety stock levels"
-                          : activeItem.key === "purchase_orders"
-                            ? "Manage and generate supplier purchase orders"
-                            : activeItem.key === "items"
-                              ? "Manage and track warehouse stocks"
-                              : "Here's what's happening with your inventory today."}
+                    ? `${supplierList.length} suppliers · ${
+                        supplierList.filter((s) => s.active).length
+                      } active`
+                    : activeItem.key === "transactions"
+                    ? `${transactionList.length} total records`
+                    : activeItem.key === "stock_alerts"
+                    ? "Monitor items below safety stock levels"
+                    : activeItem.key === "purchase_orders"
+                    ? "Manage and generate supplier purchase orders"
+                    : activeItem.key === "items"
+                    ? "Manage and track warehouse stocks"
+                    : "Here's what's happening with your inventory today."}
                 </div>
               </div>
               {/* Page-specific action buttons injected by individual pages */}
@@ -504,35 +575,46 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                   {activeItem.key === "users"
                     ? "Users"
                     : activeItem.key === "suppliers"
-                      ? "Suppliers"
-                      : activeItem.key === "transactions"
-                        ? "Transactions"
-                        : activeItem.key === "stock_alerts"
-                          ? "Stock Alerts"
-                          : activeItem.key === "purchase_orders"
-                            ? "Purchase Orders"
-                            : activeItem.key === "items"
-                              ? "Inventory"
-                              : activeItem.key === "categories"
-                                ? "Categories"
-                                : activeItem.key === "reports"
-                                  ? "Reports"
-                                  : activeItem.key === "audit_logs"
-                                    ? "Audit Logs"
-                                    : activeItem.key === "profile"
-                                      ? "Profile"
-                                      : "Welcome back"}
+                    ? "Suppliers"
+                    : activeItem.key === "transactions"
+                    ? "Transactions"
+                    : activeItem.key === "stock_alerts"
+                    ? "Stock Alerts"
+                    : activeItem.key === "purchase_orders"
+                    ? "Purchase Orders"
+                    : activeItem.key === "items"
+                    ? "Inventory"
+                    : activeItem.key === "categories"
+                    ? "Categories"
+                    : activeItem.key === "reports"
+                    ? "Reports"
+                    : activeItem.key === "audit_logs"
+                    ? "Audit Logs"
+                    : activeItem.key === "profile"
+                    ? "Profile"
+                    : "Welcome back"}
                 </h2>
                 <p style={{ fontSize: 12, color: c.textMuted }}>
                   {activeItem.key === "users" && `${userList.length} accounts`}
-                  {activeItem.key === "suppliers" && `${supplierList.length} suppliers`}
-                  {activeItem.key === "transactions" && `${transactionList.length} records`}
-                  {activeItem.key === "stock_alerts" && `Monitor items below safety stock levels`}
-                  {activeItem.key === "purchase_orders" && `Purchase Orders Management`}
+                  {activeItem.key === "suppliers" &&
+                    `${supplierList.length} suppliers`}
+                  {activeItem.key === "transactions" &&
+                    `${transactionList.length} records`}
+                  {activeItem.key === "stock_alerts" &&
+                    `Monitor items below safety stock levels`}
+                  {activeItem.key === "purchase_orders" &&
+                    `Purchase Orders Management`}
                 </p>
               </div>
               {headerActions && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
                   {headerActions}
                 </div>
               )}

@@ -46,97 +46,13 @@ interface PurchaseOrdersProps {
 }
 
 // ── Mock Supplier Items Mapping ──────────────────────────────
-const DEFAULT_SUPPLIER_ITEMS: Record<string, { id: string; name: string; defaultPrice: number }[]> = {
-  "SPL-1001": [ // Lanka Steel Supplies
-    { id: "itm-1", name: "Steel Hex Bolts M8", defaultPrice: 15 },
-    { id: "itm-2", name: "Steel Plates 10mm", defaultPrice: 1200 },
-    { id: "itm-3", name: "Threaded Rods 1m", defaultPrice: 350 },
-    { id: "itm-4", name: "Steel Angle Bar 2 inch", defaultPrice: 850 },
-  ],
-  "SPL-1002": [ // Ceylon Agro Industries
-    { id: "itm-5", name: "Jute Bags Large", defaultPrice: 80 },
-    { id: "itm-6", name: "Cardboard Cartons", defaultPrice: 45 },
-    { id: "itm-7", name: "Agricultural Twine", defaultPrice: 150 },
-  ],
-  "SPL-1004": [ // Royal Packaging Ltd
-    { id: "itm-8", name: "Bubble Wrap Roll 100m", defaultPrice: 2500 },
-    { id: "itm-9", name: "Stretch Film Roll", defaultPrice: 1800 },
-    { id: "itm-10", name: "Packing Tape Clear", defaultPrice: 120 },
-  ],
-  "SPL-1006": [ // Premier Electricals
-    { id: "itm-11", name: "Copper Wire 2.5mm 100m", defaultPrice: 8500 },
-    { id: "itm-12", name: "LED Panel 18W", defaultPrice: 1400 },
-    { id: "itm-13", name: "PVC Conduit 20mm 3m", defaultPrice: 450 },
-  ],
-  "SPL-1005": [ // Apex Tools & Hardware
-    { id: "itm-14", name: "Angle Grinder Discs", defaultPrice: 280 },
-    { id: "itm-15", name: "Safety Helmets", defaultPrice: 1200 },
-    { id: "itm-16", name: "Industrial Gloves L", defaultPrice: 350 },
-  ],
-};
+const DEFAULT_SUPPLIER_ITEMS: Record<string, { id: string; name: string; defaultPrice: number }[]> = {};
 
-const GENERAL_FALLBACK_ITEMS = [
-  { id: "itm-gen-1", name: "Standard Packing Box", defaultPrice: 100 },
-  { id: "itm-gen-2", name: "Bubble Wrap Small", defaultPrice: 500 },
-  { id: "itm-gen-3", name: "Heavy Duty Scissors", defaultPrice: 250 },
-  { id: "itm-gen-4", name: "Label Stickers (Roll)", defaultPrice: 400 },
-];
+const GENERAL_FALLBACK_ITEMS: { id: string; name: string; defaultPrice: number }[] = [];
 
 export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps) {
   // ── States ────────────────────────────────────────────────
-  const [poList, setPoList] = useState<PurchaseOrder[]>([
-    {
-      id: "PO-2001",
-      supplierId: "SPL-1001",
-      supplierName: "Lanka Steel Supplies",
-      poType: "Generated",
-      createdAt: "2026-07-10 10:30",
-      updatedAt: "2026-07-10 10:30",
-      netTotal: 25000,
-      items: [
-        { no: 1, itemId: "itm-1", itemName: "Steel Hex Bolts M8", quantity: 500, unitPrice: 15, total: 7500 },
-        { no: 2, itemId: "itm-3", itemName: "Threaded Rods 1m", quantity: 50, unitPrice: 350, total: 17500 }
-      ]
-    },
-    {
-      id: "PO-2002",
-      supplierId: "SPL-1006",
-      supplierName: "Premier Electricals",
-      poType: "Draft",
-      createdAt: "2026-07-11 14:15",
-      updatedAt: "2026-07-11 14:20",
-      netTotal: 87000,
-      items: [
-        { no: 1, itemId: "itm-12", itemName: "LED Panel 18W", quantity: 30, unitPrice: 1400, total: 42000 },
-        { no: 2, itemId: "itm-13", itemName: "PVC Conduit 20mm 3m", quantity: 100, unitPrice: 450, total: 45000 }
-      ]
-    },
-    {
-      id: "PO-2003",
-      supplierId: "SPL-1002",
-      supplierName: "Ceylon Agro Industries",
-      poType: "Generated",
-      createdAt: "2026-07-09 09:00",
-      updatedAt: "2026-07-09 09:00",
-      netTotal: 80000,
-      items: [
-        { no: 1, itemId: "itm-5", itemName: "Jute Bags Large", quantity: 1000, unitPrice: 80, total: 80000 }
-      ]
-    },
-    {
-      id: "PO-2004",
-      supplierId: "SPL-1004",
-      supplierName: "Royal Packaging Ltd",
-      poType: "Draft",
-      createdAt: "2026-07-12 08:30",
-      updatedAt: "2026-07-12 08:35",
-      netTotal: 31000,
-      items: [
-        { no: 1, itemId: "itm-8", itemName: "Bubble Wrap Roll 100m", quantity: 10, unitPrice: 2500, total: 25000 },
-        { no: 2, itemId: "itm-10", itemName: "Packing Tape Clear", quantity: 50, unitPrice: 120, total: 6000 }
-      ]
-    }
-  ]);
+  const [poList, setPoList] = useState<PurchaseOrder[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All" | "Draft" | "Generated">("All");
@@ -210,9 +126,9 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
     // Pick default items of this supplier, or fallback
     const supplierItems = DEFAULT_SUPPLIER_ITEMS[supplier.id] || GENERAL_FALLBACK_ITEMS;
     
-    // Pre-populate with first item
+    // Pre-populate with first item if any exist
     const firstItem = supplierItems[0] || GENERAL_FALLBACK_ITEMS[0];
-    const initialItems: POItem[] = [
+    const initialItems: POItem[] = firstItem ? [
       {
         no: 1,
         itemId: firstItem.id,
@@ -221,7 +137,7 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
         unitPrice: firstItem.defaultPrice,
         total: 10 * firstItem.defaultPrice
       }
-    ];
+    ] : [];
 
     const newPO: PurchaseOrder = {
       id: newPOId,
@@ -231,7 +147,7 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
       items: initialItems,
       createdAt: dateStr,
       updatedAt: dateStr,
-      netTotal: initialItems[0].total
+      netTotal: initialItems.length > 0 ? initialItems[0].total : 0
     };
 
     setPoList([newPO, ...poList]);

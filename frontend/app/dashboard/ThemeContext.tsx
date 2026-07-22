@@ -53,14 +53,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMounted(true);
-    const savedMode = localStorage.getItem("theme-mode") as ThemeMode;
+    const savedMode = sessionStorage.getItem("theme-mode") as ThemeMode;
     if (savedMode) setMode(savedMode);
   }, []);
 
   const toggleTheme = () => {
     const nextMode = mode === "light" ? "dark" : "light";
     setMode(nextMode);
-    localStorage.setItem("theme-mode", nextMode);
+    sessionStorage.setItem("theme-mode", nextMode);
   };
 
   const c = theme[mode];

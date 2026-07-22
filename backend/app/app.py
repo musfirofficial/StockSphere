@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -27,11 +28,11 @@ async def lifespan(_app: FastAPI):
     async with async_session_maker() as session:
         created = await AdminService.create_admin(session)
         if created == "created":
-            print("✓ Default admin created")
+            print("[OK] Default admin created")
         elif created == "updated":
-            print("✓ Admin Reset Password")
+            print("[OK] Admin Reset Password")
         else:
-            print("✓ Admin already exists")
+            print("[OK] Admin already exists")
 
     await seed_database()
     yield
@@ -42,6 +43,15 @@ async def lifespan(_app: FastAPI):
 
 # 1. Disable the online docs routes by setting them to None
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+
+# CORS — allow the Next.js dev server to talk to the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 2. Mount your local static folder
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
 import { useData, Supplier } from "../DataContext";
+import { apiFetch } from "@/lib/api";
 
 // ── Checkbox ───────────────────────────────────────────────
 function Cb({
@@ -183,7 +184,7 @@ const inp = (c: any) => ({
 // ── Create Supplier Modal ──────────────────────────────────
 interface CreateSupplierModalProps {
   onClose: () => void;
-  onSave: (s: Partial<Supplier>) => void;
+  onSave: (s: Partial<Supplier>) => Promise<void> | void;
   c: any;
 }
 function CreateSupplierModal({ onClose, onSave, c }: CreateSupplierModalProps) {
@@ -434,7 +435,7 @@ function DeleteSupplierModal({
 // ── Main Page Component ─────────────────────────────────────
 export default function SuppliersPage() {
   const { mode, c } = useTheme();
-  const { supplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier } = useData();
+  const { supplierList, setSupplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier } = useData();
 
   // Selected checkbox rows
   const [selected, setSelected] = useState<string[]>([]);
@@ -546,32 +547,92 @@ export default function SuppliersPage() {
     }
   };
 
-  const handleSaveEdit = (form: Partial<Supplier>) => {
-    setSupplierEditError("");
-    if (
-      !form.supplierName?.trim() ||
-      !form.contactPerson?.trim() ||
-      !form.phone?.trim() ||
-      !form.email?.trim() ||
-      !form.address?.trim()
-    ) {
-      setSupplierEditError("Supplier name, contact person, phone, email, and address are required.");
-      return;
+  // Load suppliers from backend
+  const loadSuppliersFromBackend = async () => {
+    try {
+      const data = await apiFetch<any[]>("/suppliers/");
+      const mapped: Supplier[] = data.map((s: any) => ({
+        id: s.supplier_id,
+        supplierName: s.supplier_name,
+        contactPerson: s.contact_person,
+        phone: s.phone,
+        email: s.email,
+        address: s.address,
+        active: s.is_active,
+        createdAt: s.created_at,
+        updatedAt: s.updated_at,
+        notes: s.notes || "",
+        totalSupplies: 0,
+      }));
+      setSupplierList(mapped);
+    } catch (err: any) {
+      console.error("Failed to load suppliers from backend:", err);
     }
-
-    saveSupplierEdit(form);
-    setSelectedSupplier(form as Supplier);
-    setIsEditingSupplier(false);
   };
 
-  const handleDeleteConfirm = () => {
-    if (!supplierToDelete) return;
-    deleteSupplier(supplierToDelete.id);
-    setSelected((prev) => prev.filter((x) => x !== supplierToDelete.id));
-    if (selectedSupplier?.id === supplierToDelete.id) {
-      setSelectedSupplier(null);
+  useEffect(() => {
+    loadSuppliersFromBackend();
+  }, []);
+
+  const handleCreateSupplier = async (s: Partial<Supplier>) => {
+    try {
+      await apiFetch("/suppliers/", {
+        method: "POST",
+        body: JSON.stringify({
+          supplier_name: s.supplierName,
+          contact_person: s.contactPerson,
+          phone: s.phone,
+          email: s.email,
+          address: s.address,
+          notes: s.notes || null,
+        }),
+      });
+
+      setAddSupplierOpen(false);
+      loadSuppliersFromBackend();
+    } catch (err: any) {
+      alert(err.message || "Failed to create supplier");
     }
-    setSupplierToDelete(null);
+  };
+
+  const handleSaveEdit = async (form: Partial<Supplier>) => {
+    setSupplierEditError("");
+    if (!selectedSupplier) return;
+
+    try {
+      await apiFetch(`/suppliers/${selectedSupplier.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          supplier_name: form.supplierName,
+          contact_person: form.contactPerson,
+          phone: form.phone,
+          email: form.email,
+          address: form.address,
+          notes: form.notes || null,
+          is_active: form.active,
+        }),
+      });
+
+      setIsEditingSupplier(false);
+      loadSuppliersFromBackend();
+    } catch (err: any) {
+      setSupplierEditError(err.message || "Failed to update supplier");
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!supplierToDelete) return;
+    try {
+      await apiFetch(`/suppliers/${supplierToDelete.id}`, { method: "DELETE" });
+      setSelected((prev) => prev.filter((x) => x !== supplierToDelete.id));
+      if (selectedSupplier?.id === supplierToDelete.id) {
+        setSelectedSupplier(null);
+      }
+      setSupplierToDelete(null);
+      loadSuppliersFromBackend();
+    } catch (err: any) {
+      alert(err.message || "Failed to delete supplier");
+    }
   };
 
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -1296,11 +1357,7 @@ export default function SuppliersPage() {
       {addSupplierOpen && (
         <CreateSupplierModal
           onClose={() => setAddSupplierOpen(false)}
-          onSave={(s) => {
-            addSupplier(s);
-            setAddSupplierOpen(false);
-            setPage(1);
-          }}
+          onSave={handleCreateSupplier}
           c={c}
         />
       )}

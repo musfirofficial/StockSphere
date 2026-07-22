@@ -44,7 +44,7 @@ async def get_user_by_user_id(db:AsyncSession, user_id : uuid.UUID) -> User | No
 
  # -------------------------- CRUD for get all users -------------------------- #
 async def get_all_users(db: AsyncSession) -> Sequence[User] | None:
-    result = await db.execute(select(User).where(User.role != UserRole.ADMIN))
+    result = await db.execute(select(User))
     return result.scalars().all()
 
 # ----------------------- CRUD for update exising user ----------------------- #
