@@ -103,11 +103,12 @@ interface ModalProps {
   children: React.ReactNode;
   c: any;
   width?: number;
+  closeOnOverlayClick?: boolean;
 }
-function Modal({ title, onClose, children, c, width = 440 }: ModalProps) {
+function Modal({ title, onClose, children, c, width = 440, closeOnOverlayClick = true }: ModalProps) {
   return (
     <div
-      onClick={onClose}
+      onClick={closeOnOverlayClick ? onClose : undefined}
       style={{
         position: "fixed",
         inset: 0,
@@ -260,7 +261,7 @@ function CreateModal({ onClose, onSave, c }: CreateModalProps) {
   };
 
   return (
-    <Modal title="Create New User" onClose={onClose} c={c} width={460}>
+    <Modal title="Create New User" onClose={onClose} c={c} width={460} closeOnOverlayClick={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {error && (
           <div
@@ -469,19 +470,24 @@ function DeleteModal({ user, onClose, onConfirm, c }: DeleteModalProps) {
 // ── Main Page Component ─────────────────────────────────────
 export default function UsersPage() {
   const { mode, c } = useTheme();
-  const { userList, setUserList, setHeaderActions, addUser, saveUserEdit, deleteUser } = useData();
+  const { userList, setUserList, setHeaderActions, loggedInUser, addUser, saveUserEdit, deleteUser } = useData();
 
   // Selected for checkbox bulk actions
   const [selected, setSelected] = useState<string[]>([]);
   // Search state
   const [userSearch, setUserSearch] = useState("");
-  
+
   // Side Panel state
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [editForm, setEditForm] = useState<Partial<User>>({});
-  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "" });
+  const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
   const [editError, setEditError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
+  const [passwordSuccess, setPasswordSuccess] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   // Modals state
   const [addOpen, setAddOpen] = useState(false);
@@ -531,14 +537,48 @@ export default function UsersPage() {
   useEffect(() => {
     if (selectedUser) {
       setEditForm(selectedUser);
-      setPasswordForm({ currentPassword: "", newPassword: "" });
+      setPasswordForm({ newPassword: "", confirmPassword: "" });
       setEditError("");
+      setProfileSuccess("");
+      setPasswordSuccess("");
+      setPasswordError("");
     }
   }, [selectedUser]);
+
+  // Current logged in username
+  const currentUsername = useMemo(() => {
+    if (loggedInUser?.username) return loggedInUser.username.toLowerCase();
+    if (typeof window !== "undefined") {
+      const userStr = sessionStorage.getItem("user");
+      if (userStr) {
+        try {
+          const u = JSON.parse(userStr);
+          return (u.username || u.user_name || "").toLowerCase();
+        } catch (e) { }
+      }
+    }
+    return "";
+  }, [loggedInUser]);
 
   // Filtering users
   const filteredUsers = useMemo(() => {
     return userList.filter((u) => {
+      const uname = u.username ? u.username.toLowerCase() : "";
+
+      // 1. Hide adminhomerex
+      if (uname === "adminhomerex" || uname === "admin_homerex" || uname.includes("adminhomerex")) {
+        return false;
+      }
+
+      // 2. Hide current user (yourself)
+      if (currentUsername && uname === currentUsername) {
+        return false;
+      }
+      const currentUserId = loggedInUser?.id || (loggedInUser as any)?.userId;
+      if (currentUserId && u.id === currentUserId) {
+        return false;
+      }
+
       const q = userSearch.toLowerCase();
       return (
         !q ||
@@ -548,8 +588,8 @@ export default function UsersPage() {
         u.phone.toLowerCase().includes(q) ||
         u.nic.toLowerCase().includes(q)
       );
-    });
-  }, [userList, userSearch]);
+    }).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }, [userList, userSearch, currentUsername, loggedInUser]);
 
   const totalCount = filteredUsers.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -635,39 +675,78 @@ export default function UsersPage() {
     loadUsersFromBackend();
   };
 
-  const handleSaveEdit = async (form: Partial<User>) => {
+  const handleSaveProfileDetails = async () => {
     setEditError("");
+    setProfileSuccess("");
     if (!selectedUser) return;
+    setSavingProfile(true);
+
+    // Map frontend role labels → backend UserRole enum values
+    const roleMap: Record<string, string> = {
+      Admin: "Admin",
+      Manager: "Inventory Manager",
+      Staff: "Sales",
+      Auditor: "Auditor",
+    };
 
     try {
-      // 1. Update Profile Info
       await apiFetch(`/users/${selectedUser.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          full_name: form.fullName,
-          user_name: form.username,
-          nic: form.nic,
-          email: form.email,
-          phone: form.phone,
-          is_active: form.active,
+          full_name: editForm.fullName || undefined,
+          user_name: editForm.username || undefined,
+          nic: editForm.nic || undefined,
+          email: editForm.email || undefined,
+          phone: editForm.phone || undefined,
+          role: editForm.role ? roleMap[editForm.role] : undefined,
+          is_active: editForm.active,
         }),
       });
 
-      // 2. Update Password if provided
-      if (passwordForm.newPassword) {
-        await apiFetch(`/users/${selectedUser.id}/password`, {
-          method: "PUT",
-          body: JSON.stringify({
-            current_password: passwordForm.currentPassword || undefined,
-            new_password: passwordForm.newPassword,
-          }),
-        });
-      }
-
-      setIsEditingUser(false);
+      setProfileSuccess("Profile details saved successfully!");
       loadUsersFromBackend();
     } catch (err: any) {
-      setEditError(err.message || "Failed to update user");
+      setEditError(err.message || "Failed to update profile details");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSavePassword = async () => {
+    setPasswordError("");
+    setPasswordSuccess("");
+    if (!selectedUser) return;
+
+    if (!passwordForm.newPassword) {
+      setPasswordError("Please enter a new password.");
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError("New password and confirm password do not match.");
+      return;
+    }
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordError("Password must be at least 8 characters.");
+      return;
+    }
+
+    setSavingPassword(true);
+    try {
+      await apiFetch(`/users/${selectedUser.id}/password`, {
+        method: "PUT",
+        body: JSON.stringify({
+          // Admin changing someone else's password: no current_password needed
+          // Backend skips current_password check when caller is admin changing others
+          new_password: passwordForm.newPassword,
+        }),
+      });
+
+      setPasswordSuccess("Password updated successfully!");
+      setPasswordForm({ newPassword: "", confirmPassword: "" });
+    } catch (err: any) {
+      setPasswordError(err.message || "Failed to update password");
+    } finally {
+      setSavingPassword(false);
     }
   };
 
@@ -1182,94 +1261,135 @@ export default function UsersPage() {
                       </div>
                       <Field label="Created At" c={c}>
                         <div style={{ fontSize: 12.5, color: c.textMuted }}>
-                          {selectedUser.createdAt}
+                          {selectedUser.createdAt ? new Date(selectedUser.createdAt).toLocaleString() : "—"}
                         </div>
                       </Field>
                       <Field label="Updated At" c={c}>
                         <div style={{ fontSize: 12.5, color: c.textMuted }}>
-                          {selectedUser.updatedAt}
+                          {selectedUser.updatedAt ? new Date(selectedUser.updatedAt).toLocaleString() : "—"}
                         </div>
                       </Field>
                     </div>
                   </div>
                 ) : (
                   /* EDIT MODE */
-                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    <Field label="Full Name" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.fullName || ""}
-                        onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
-                      />
-                    </Field>
-                    <Field label="Username" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.username || ""}
-                        onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
-                      />
-                    </Field>
-                    <Field label="NIC Number" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.nic || ""}
-                        onChange={(e) => setEditForm({ ...editForm, nic: e.target.value })}
-                      />
-                    </Field>
-                    <Field label="Email Address" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.email || ""}
-                        onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                      />
-                    </Field>
-                    <Field label="Phone Number" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.phone || ""}
-                        onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                      />
-                    </Field>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <Field label="Role" c={c}>
-                        <select
-                          style={inp(c)}
-                          value={editForm.role}
-                          onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    {/* Section 1: User Profile Details */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: c.text }}>
+                        Profile Details
+                      </span>
+
+                      {profileSuccess && (
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            background: c.accentSoft,
+                            color: c.accent,
+                            borderRadius: 8,
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                          }}
                         >
-                          {ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="Active Status" c={c}>
-                        <select
+                          {profileSuccess}
+                        </div>
+                      )}
+
+                      <Field label="Full Name" c={c}>
+                        <input
                           style={inp(c)}
-                          value={editForm.active ? "active" : "inactive"}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              active: e.target.value === "active",
-                            })
-                          }
-                        >
-                          <option value="active">Active</option>
-                          <option value="inactive">Inactive</option>
-                        </select>
+                          value={editForm.fullName || ""}
+                          onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
+                        />
                       </Field>
+                      <Field label="Username" c={c}>
+                        <input
+                          style={inp(c)}
+                          value={editForm.username || ""}
+                          onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="NIC Number" c={c}>
+                        <input
+                          style={inp(c)}
+                          value={editForm.nic || ""}
+                          onChange={(e) => setEditForm({ ...editForm, nic: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Email Address" c={c}>
+                        <input
+                          style={inp(c)}
+                          value={editForm.email || ""}
+                          onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Phone Number" c={c}>
+                        <input
+                          style={inp(c)}
+                          value={editForm.phone || ""}
+                          onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                        />
+                      </Field>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <Field label="Role" c={c}>
+                          <select
+                            style={inp(c)}
+                            value={editForm.role}
+                            onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                          >
+                            {ROLES.map((r) => (
+                              <option key={r} value={r}>
+                                {r}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="Active Status" c={c}>
+                          <select
+                            style={inp(c)}
+                            value={editForm.active ? "active" : "inactive"}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                active: e.target.value === "active",
+                              })
+                            }
+                          >
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                          </select>
+                        </Field>
+                      </div>
+
+                      <button
+                        onClick={handleSaveProfileDetails}
+                        disabled={savingProfile}
+                        style={{
+                          marginTop: 6,
+                          padding: "9px 16px",
+                          borderRadius: 8,
+                          border: "none",
+                          background: c.accent,
+                          color: "#fff",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          alignSelf: "flex-end",
+                        }}
+                      >
+                        {savingProfile ? "Saving Details..." : "Save Profile Details"}
+                      </button>
                     </div>
 
-                    {/* Password Change Section */}
+                    {/* Section 2: Password Change */}
                     <div
                       style={{
-                        marginTop: 14,
-                        paddingTop: 16,
+                        paddingTop: 18,
                         borderTop: `1px solid ${c.border}`,
                         display: "flex",
                         flexDirection: "column",
-                        gap: 12,
+                        gap: 14,
                       }}
                     >
                       <span
@@ -1284,20 +1404,37 @@ export default function UsersPage() {
                       >
                         <Lock size={14} /> Password Change
                       </span>
-                      <Field label="Current Password" c={c}>
-                        <input
-                          type="password"
-                          style={inp(c)}
-                          value={passwordForm.currentPassword}
-                          onChange={(e) =>
-                            setPasswordForm({
-                              ...passwordForm,
-                              currentPassword: e.target.value,
-                            })
-                          }
-                          placeholder="Enter current password"
-                        />
-                      </Field>
+
+                      {passwordError && (
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            background: c.dangerSoft,
+                            color: c.danger,
+                            borderRadius: 8,
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {passwordError}
+                        </div>
+                      )}
+
+                      {passwordSuccess && (
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            background: c.accentSoft,
+                            color: c.accent,
+                            borderRadius: 8,
+                            fontSize: 12.5,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {passwordSuccess}
+                        </div>
+                      )}
+
                       <Field label="New Password" c={c}>
                         <input
                           type="password"
@@ -1309,9 +1446,54 @@ export default function UsersPage() {
                               newPassword: e.target.value,
                             })
                           }
-                          placeholder="Enter new password"
+                          placeholder="Enter new password (min 8 characters)"
                         />
                       </Field>
+                      <Field label="Confirm Password" c={c}>
+                        <input
+                          type="password"
+                          style={{
+                            ...inp(c),
+                            borderColor:
+                              passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword
+                                ? c.danger
+                                : undefined,
+                          }}
+                          value={passwordForm.confirmPassword}
+                          onChange={(e) =>
+                            setPasswordForm({
+                              ...passwordForm,
+                              confirmPassword: e.target.value,
+                            })
+                          }
+                          placeholder="Confirm new password"
+                        />
+                        {passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
+                          <span style={{ fontSize: 11.5, color: c.danger, marginTop: 3, display: "block" }}>
+                            Passwords do not match
+                          </span>
+                        )}
+                      </Field>
+
+                      <button
+                        onClick={handleSavePassword}
+                        disabled={savingPassword}
+                        style={{
+                          marginTop: 6,
+                          padding: "9px 16px",
+                          borderRadius: 8,
+                          border: `1px solid ${c.border}`,
+                          background: c.surfaceMuted,
+                          color: c.text,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          alignSelf: "flex-end",
+                        }}
+                      >
+                        {savingPassword ? "Updating Password..." : "Update Password"}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1368,38 +1550,21 @@ export default function UsersPage() {
                     </button>
                   </>
                 ) : (
-                  <>
-                    <button
-                      onClick={() => setIsEditingUser(false)}
-                      style={{
-                        padding: "9px 14px",
-                        borderRadius: 8,
-                        border: `1px solid ${c.border}`,
-                        background: c.surface,
-                        color: c.text,
-                        fontSize: 13,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => handleSaveEdit(editForm)}
-                      style={{
-                        padding: "9px 16px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: c.accent,
-                        color: "#fff",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Save Changes
-                    </button>
-                  </>
+                  <button
+                    onClick={() => setIsEditingUser(false)}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 8,
+                      border: `1px solid ${c.border}`,
+                      background: c.surface,
+                      color: c.text,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Done
+                  </button>
                 )}
               </div>
             </div>

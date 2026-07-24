@@ -245,7 +245,7 @@ export default function DashboardOverview() {
         />
         <StatCard
           c={c}
-          label="Sold value (month)"
+          label="Sold value (life time)"
           value={`Rs ${totalSoldValue.toLocaleString()}`}
           sub={`${totalSoldUnits} units across ${distinctSKUs} items`}
           icon={Wallet}

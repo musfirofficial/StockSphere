@@ -502,17 +502,19 @@ export default function SuppliersPage() {
 
   // Filter supplier list
   const filteredSuppliers = useMemo(() => {
-    return supplierList.filter((s) => {
-      const q = supplierSearch.toLowerCase();
-      return (
-        !q ||
-        s.supplierName.toLowerCase().includes(q) ||
-        s.contactPerson.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q) ||
-        s.phone.toLowerCase().includes(q) ||
-        s.address.toLowerCase().includes(q)
-      );
-    });
+    return supplierList
+      .filter((s) => {
+        const q = supplierSearch.toLowerCase();
+        return (
+          !q ||
+          s.supplierName.toLowerCase().includes(q) ||
+          s.contactPerson.toLowerCase().includes(q) ||
+          s.email.toLowerCase().includes(q) ||
+          s.phone.toLowerCase().includes(q) ||
+          s.address.toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => a.supplierName.localeCompare(b.supplierName));
   }, [supplierList, supplierSearch]);
 
   const totalCount = filteredSuppliers.length;
@@ -558,11 +560,11 @@ export default function SuppliersPage() {
         phone: s.phone,
         email: s.email,
         address: s.address,
-        active: s.is_active,
+        active: s.is_active ?? true,
         createdAt: s.created_at,
         updatedAt: s.updated_at,
         notes: s.notes || "",
-        totalSupplies: 0,
+        totalSupplies: s.total_supplies || 0,
       }));
       setSupplierList(mapped);
     } catch (err: any) {
@@ -1143,12 +1145,12 @@ export default function SuppliersPage() {
                       )}
                       <Field label="Created At" c={c}>
                         <div style={{ fontSize: 12.5, color: c.textMuted }}>
-                          {selectedSupplier.createdAt}
+                          {selectedSupplier.createdAt ? new Date(selectedSupplier.createdAt).toLocaleString() : "—"}
                         </div>
                       </Field>
                       <Field label="Updated At" c={c}>
                         <div style={{ fontSize: 12.5, color: c.textMuted }}>
-                          {selectedSupplier.updatedAt}
+                          {selectedSupplier.updatedAt ? new Date(selectedSupplier.updatedAt).toLocaleString() : "—"}
                         </div>
                       </Field>
                     </div>

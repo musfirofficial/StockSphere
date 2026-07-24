@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
 # -------------------------- Setting local timezone -------------------------- #
-local_tz = timezone(timedelta(hours=5, minutes=30))
+local_tz = datetime.now().astimezone().tzinfo
 
 
 # --------------------------- Enums for User Roles --------------------------- #
@@ -55,9 +55,11 @@ class POType(enum.Enum):
 class AuditAction(enum.Enum):
     # Authentication & User Management
     LOGIN_SUCCESS = "LOGIN_SUCCESS"
+    LOGOUT_SUCCESS = "LOGOUT_SUCCESS"
     USER_CREATE = "USER_CREATE"
     USER_DELETE = "USER_DELETE"
     USER_DEACTIVATE = "USER_DEACTIVATE"
+    USER_REACTIVATE = "USER_REACTIVATE"
     USER_PASSWORD_CHANGE = "USER_PASSWORD_CHANGE"
 
     # Category Management
@@ -68,11 +70,13 @@ class AuditAction(enum.Enum):
     SUPPLIER_CREATE = "SUPPLIER_CREATE"
     SUPPLIER_DELETE = "SUPPLIER_DELETE"
     SUPPLIER_DEACTIVATE = "SUPPLIER_DEACTIVATE"
+    SUPPLIER_REACTIVATE = "SUPPLIER_REACTIVATE"
 
     # Item & Price Management
     ITEM_CREATE = "ITEM_CREATE"
     ITEM_DELETE = "ITEM_DELETE"
     ITEM_DEACTIVATE = "ITEM_DEACTIVATE"
+    ITEM_REACTIVATE = "ITEM_REACTIVATE"
     ITEM_PRICE_UPDATE = "ITEM_PRICE_UPDATE"
 
 
@@ -288,7 +292,7 @@ class AuditLog(Base):
     # Human-readable summary (e.g., "Updated selling price of Item 'Laptop X' from $1000 to $1200")
     description: Mapped[str] = mapped_column(String, nullable=False)
     target_table: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=True)
     old_value: Mapped[str | None] = mapped_column(String, nullable=True)
     new_value: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

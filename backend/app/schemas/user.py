@@ -30,6 +30,8 @@ class UserBase(BaseModel):
                 raise ValueError("Invalid NIC format")
         elif info.field_name == 'email':
             v = v.lower()
+            if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
+                raise ValueError("Invalid email address format (e.g. user@example.com)")
         elif info.field_name == 'phone':
             v = v.strip()
             if not re.match(r"^\d{3} \d{3} \d{4}$", v):
@@ -55,6 +57,7 @@ class UserUpdate(BaseModel):
     nic: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    role: Optional[UserRole] = None
     is_active: Optional[bool] = None
 
     @field_validator('user_name', 'nic', 'email','phone', 'full_name')

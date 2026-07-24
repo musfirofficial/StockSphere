@@ -115,6 +115,7 @@ export default function LoginPage() {
             userId: decodedPayload.sub,
             fullName: decodedPayload.full_name,
             role: decodedPayload.role,
+            username: username.trim().toLowerCase(),
           })
         );
       } catch {

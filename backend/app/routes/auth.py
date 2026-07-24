@@ -69,4 +69,5 @@ async def logout(
     db: AsyncSession = Depends(get_async_session),
 ):
     await dependencies.clear_user_refresh_token(db, user_id=current_user.user_id)
+    await auditlog_crud.log_user_logout(db, current_user)
     return {"detail": "Logged out successfully"}

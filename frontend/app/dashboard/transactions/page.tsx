@@ -15,7 +15,6 @@ import { useTheme } from "../ThemeContext";
 import {
   useData,
   Transaction,
-  ALL_ITEMS,
   getItemCurrentQty,
 } from "../DataContext";
 
@@ -23,7 +22,7 @@ type BulkRow = { item: string; type: "Stock in" | "Stock out"; qty: number };
 
 export default function TransactionsPage() {
   const { c } = useTheme();
-  const { transactionList, recordTransactions, setHeaderActions } = useData();
+  const { transactionList, itemList, loggedInUser, recordTransactions, setHeaderActions } = useData();
 
   // ── Read view state ──
   const [search, setSearch] = useState("");
@@ -36,21 +35,12 @@ export default function TransactionsPage() {
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [itemSearch, setItemSearch] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [currentUser, setCurrentUser] = useState("R. Fernando");
+  // recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordProgress, setRecordProgress] = useState(0);
+  const [recordError, setRecordError] = useState<string | null>(null);
   const ddRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const u = sessionStorage.getItem("user");
-    if (u) {
-      try {
-        const parsed = JSON.parse(u);
-        if (parsed?.fullName) {
-          const [f, ...rest] = parsed.fullName.split(" ");
-          setCurrentUser(rest.length ? `${f[0]}. ${rest[0]}` : f);
-        }
-      } catch {}
-    }
-  }, []);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -109,14 +99,18 @@ export default function TransactionsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const pageRows = filtered.slice((page - 1) * PAGE, page * PAGE);
 
+  // Active items from real itemList for suggestions
   const suggestions = useMemo(() => {
     const q = itemSearch.toLowerCase();
-    return q ? ALL_ITEMS.filter((i) => i.toLowerCase().includes(q)) : [];
-  }, [itemSearch]);
+    if (!q) return [];
+    return itemList
+      .filter((i) => i.active && i.itemName.toLowerCase().includes(q))
+      .slice(0, 20);
+  }, [itemSearch, itemList]);
 
   const addRow = (item: string) => {
     if (!bulkRows.find((r) => r.item === item))
-      setBulkRows((p) => [...p, { item, type: "Stock in", qty: 100 }]);
+      setBulkRows((p) => [...p, { item, type: "Stock in", qty: 1 }]);
     setItemSearch("");
     setShowSuggestions(false);
   };
@@ -125,16 +119,32 @@ export default function TransactionsPage() {
   const updateRow = (i: number, f: Partial<BulkRow>) =>
     setBulkRows((p) => p.map((r, idx) => (idx === i ? { ...r, ...f } : r)));
 
-  const handleRecord = () => {
+  const handleRecord = async () => {
     if (!bulkRows.length) return;
     if (bulkRows.some((r) => r.qty <= 0)) {
-      alert("All quantities must be greater than zero.");
+      setRecordError("All quantities must be greater than zero.");
       return;
     }
-    recordTransactions(bulkRows, currentUser);
-    setBulkRows([]);
-    setIsAdding(false);
-    setPage(1);
+    setIsRecording(true);
+    setRecordProgress(0);
+    setRecordError(null);
+
+    // Patch recordTransactions to update progress
+    // We call it and then handle the result
+    const result = await recordTransactions(bulkRows);
+
+    setIsRecording(false);
+    if (result.success) {
+      setBulkRows([]);
+      setIsAdding(false);
+      setPage(1);
+    } else {
+      setRecordError(
+        result.completed > 0
+          ? `Recorded ${result.completed} of ${bulkRows.length}. Failed on: ${result.error}`
+          : `Failed: ${result.error}`
+      );
+    }
   };
 
   const typeBadge = (type: string) => ({
@@ -366,29 +376,60 @@ export default function TransactionsPage() {
                 >
                   <ChevronLeft size={14} />
                 </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                  (n) => (
-                    <button
-                      key={n}
-                      onClick={() => setPage(n)}
-                      style={{
-                        minWidth: 28,
-                        height: 28,
-                        borderRadius: 7,
-                        padding: "0 6px",
-                        border: `1px solid ${n === page ? c.accent : c.border}`,
-                        background: n === page ? c.accentSoft : c.surface,
-                        color: n === page ? c.accent : c.textMuted,
-                        fontSize: 12.5,
-                        fontWeight: n === page ? 600 : 500,
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                      }}
-                    >
-                      {n}
-                    </button>
-                  )
-                )}
+                {(() => {
+                  // Build windowed page list: 1 … [p-1] [p] [p+1] … N
+                  const pages: (number | "…")[] = [];
+                  const add = (n: number) => {
+                    if (!pages.includes(n)) pages.push(n);
+                  };
+                  add(1);
+                  if (page > 3) pages.push("…");
+                  if (page > 2) add(page - 1);
+                  if (page !== 1 && page !== totalPages) add(page);
+                  if (page < totalPages - 1) add(page + 1);
+                  if (page < totalPages - 2) pages.push("…");
+                  add(totalPages);
+
+                  return pages.map((n, idx) =>
+                    n === "…" ? (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 12,
+                          color: c.textFaint,
+                          userSelect: "none",
+                        }}
+                      >
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={n}
+                        onClick={() => setPage(n)}
+                        style={{
+                          minWidth: 28,
+                          height: 28,
+                          borderRadius: 7,
+                          padding: "0 6px",
+                          border: `1px solid ${n === page ? c.accent : c.border}`,
+                          background: n === page ? c.accentSoft : c.surface,
+                          color: n === page ? c.accent : c.textMuted,
+                          fontSize: 12.5,
+                          fontWeight: n === page ? 600 : 500,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {n}
+                      </button>
+                    )
+                  );
+                })()}
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}
@@ -669,7 +710,7 @@ export default function TransactionsPage() {
           </div>
           <div style={{ fontSize: 11.5, color: c.textFaint, marginTop: 1 }}>
             Operator:{" "}
-            <strong style={{ color: c.textMuted }}>{currentUser}</strong>
+            <strong style={{ color: c.textMuted }}>{loggedInUser?.fullName ?? "You"}</strong>
           </div>
         </div>
         <span
@@ -759,11 +800,12 @@ export default function TransactionsPage() {
               }}
             >
               {suggestions.map((item) => {
-                const added = bulkRows.some((r) => r.item === item);
+                const added = bulkRows.some((r) => r.item === item.itemName);
+                const stockQty = getItemCurrentQty(item.itemName, transactionList, itemList);
                 return (
                   <div
-                    key={item}
-                    onClick={() => !added && addRow(item)}
+                    key={item.id}
+                    onClick={() => !added && addRow(item.itemName)}
                     style={{
                       padding: "10px 14px",
                       display: "flex",
@@ -782,12 +824,12 @@ export default function TransactionsPage() {
                       e.currentTarget.style.background = "transparent";
                     }}
                   >
-                    <span style={{ fontWeight: 500 }}>{item}</span>
+                    <span style={{ fontWeight: 500 }}>{item.itemName}</span>
                     <div
                       style={{ display: "flex", gap: 10, alignItems: "center" }}
                     >
                       <span style={{ fontSize: 11, color: c.textFaint }}>
-                        Stock: {getItemCurrentQty(item, transactionList)}
+                        Stock: {stockQty} {item.unit}
                       </span>
                       {added && (
                         <span
@@ -869,7 +911,7 @@ export default function TransactionsPage() {
             </thead>
             <tbody>
               {bulkRows.map((row, i) => {
-                const current = getItemCurrentQty(row.item, transactionList);
+                const current = getItemCurrentQty(row.item, transactionList, itemList);
                 const qty = Number(row.qty) || 0;
                 const projected =
                   row.type === "Stock in" ? current + qty : current - qty;
@@ -992,6 +1034,34 @@ export default function TransactionsPage() {
         )}
       </div>
 
+      {/* Error Banner */}
+      {recordError && (
+        <div
+          style={{
+            margin: "0 20px",
+            padding: "10px 14px",
+            borderRadius: 8,
+            background: c.dangerSoft,
+            border: `1px solid ${c.danger}`,
+            color: c.danger,
+            fontSize: 12.5,
+            fontWeight: 500,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          <span>{recordError}</span>
+          <button
+            onClick={() => setRecordError(null)}
+            style={{ border: "none", background: "none", cursor: "pointer", color: c.danger, display: "flex" }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Footer */}
       <div
         style={{
@@ -1035,7 +1105,7 @@ export default function TransactionsPage() {
           </button>
           <button
             onClick={handleRecord}
-            disabled={bulkRows.length === 0}
+            disabled={bulkRows.length === 0 || isRecording}
             style={{
               padding: "9px 18px",
               borderRadius: 8,
@@ -1044,15 +1114,20 @@ export default function TransactionsPage() {
               color: "#fff",
               fontSize: 13,
               fontWeight: 600,
-              cursor: bulkRows.length === 0 ? "not-allowed" : "pointer",
+              cursor: bulkRows.length === 0 || isRecording ? "not-allowed" : "pointer",
               fontFamily: "inherit",
-              opacity: bulkRows.length === 0 ? 0.5 : 1,
+              opacity: bulkRows.length === 0 || isRecording ? 0.5 : 1,
               display: "flex",
               alignItems: "center",
               gap: 6,
+              minWidth: 160,
+              justifyContent: "center",
             }}
           >
-            <TrendingUp size={14} /> Record Transactions
+            <TrendingUp size={14} />
+            {isRecording
+              ? `Recording ${recordProgress}/${bulkRows.length}…`
+              : "Record Transactions"}
           </button>
         </div>
       </div>

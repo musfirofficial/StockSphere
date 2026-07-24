@@ -20,11 +20,13 @@ export default function StockAlertsPage() {
   // Helper to find supplier details for contact info
   const getSupplierContact = (supplierName: string) => {
     const supp = supplierList.find(
-      (s) => s.supplierName.toLowerCase() === supplierName.toLowerCase()
+      (s) =>
+        s.supplierName.toLowerCase() === supplierName.toLowerCase() ||
+        s.id.toLowerCase() === supplierName.toLowerCase()
     );
     return supp
-      ? { phone: supp.phone, email: supp.email }
-      : { phone: "N/A", email: "N/A" };
+      ? { name: supp.supplierName, phone: supp.phone, email: supp.email }
+      : { name: supplierName, phone: "N/A", email: "N/A" };
   };
 
   return (
@@ -282,7 +284,7 @@ export default function StockAlertsPage() {
                   }}
                 >
                   <div style={{ fontSize: 11.5, color: c.textMuted }}>
-                    Supplier: <strong style={{ color: c.text }}>{item.supplier}</strong>
+                    Supplier: <strong style={{ color: c.text }}>{contact.name}</strong>
                   </div>
 
                   <div style={{ display: "flex", gap: 12, fontSize: 12, color: c.textFaint }}>

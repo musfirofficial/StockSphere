@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { useTheme } from "../ThemeContext";
-import { useData } from "../DataContext";
+import { useData, User as DbUser } from "../DataContext";
+import { apiFetch } from "@/lib/api";
 import {
   User,
   Lock,
@@ -125,9 +126,8 @@ function Toast({
         padding: "10px 14px",
         borderRadius: 9,
         background: type === "success" ? c.accentSoft : c.dangerSoft,
-        border: `1px solid ${
-          type === "success" ? c.accent + "33" : c.danger + "33"
-        }`,
+        border: `1px solid ${type === "success" ? c.accent + "33" : c.danger + "33"
+          }`,
         color: type === "success" ? c.accent : c.danger,
         fontSize: 13,
         fontWeight: 500,
@@ -182,6 +182,42 @@ export default function ProfilePage() {
     text: string;
   } | null>(null);
 
+  const [hasFetched, setHasFetched] = useState(false);
+
+  // Load full user details from backend using username
+  useEffect(() => {
+    async function loadFullDetails() {
+      if (currentUser?.username && !hasFetched) {
+        try {
+          const data = await apiFetch<any[]>(`/users/${encodeURIComponent(currentUser.username)}`);
+          const currentUserId = currentUser.id || (currentUser as any).userId;
+          const found = data.find((u: any) => u.user_id === currentUserId || u.user_name === currentUser.username);
+          if (found) {
+            const mapped = {
+              id: found.user_id,
+              fullName: found.full_name,
+              username: found.user_name,
+              nic: found.nic,
+              email: found.email,
+              phone: found.phone,
+              password: "",
+              role: found.role === "Inventory Manager" ? "Manager" : found.role === "Sales" ? "Staff" : found.role,
+              active: found.is_active,
+              createdAt: found.created_at,
+              updatedAt: found.updated_at,
+            };
+            setCurrentUser(mapped);
+            sessionStorage.setItem("user", JSON.stringify(mapped));
+            setHasFetched(true);
+          }
+        } catch (err) {
+          console.error("Failed to load user profile from backend:", err);
+        }
+      }
+    }
+    loadFullDetails();
+  }, [currentUser?.username, hasFetched]);
+
   // Populate form when user loads
   useEffect(() => {
     if (currentUser) {
@@ -211,7 +247,9 @@ export default function ProfilePage() {
   const clearPasswordMsg = () => setTimeout(() => setPasswordMsg(null), 3500);
 
   // ── Save profile details ──
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
+    if (!currentUser) return;
+
     if (!profileForm.fullName.trim()) {
       setProfileMsg({ type: "error", text: "Full name is required." });
       clearProfileMsg();
@@ -223,21 +261,50 @@ export default function ProfilePage() {
       return;
     }
 
-    const updatedUser = {
-      ...currentUser,
-      ...profileForm,
-    } as import("../DataContext").User;
-    saveUserEdit(updatedUser);
-    sessionStorage.setItem("user", JSON.stringify(updatedUser));
-    setCurrentUser(updatedUser);
+    try {
+      const currentUserId = currentUser.id || (currentUser as any).userId;
+      const response = await apiFetch<any>(`/users/${currentUserId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          full_name: profileForm.fullName.trim(),
+          user_name: profileForm.username.trim(),
+          email: profileForm.email.trim(),
+          phone: profileForm.phone.trim(),
+          nic: profileForm.nic.trim(),
+        }),
+      });
 
-    setProfileMsg({ type: "success", text: "Profile updated successfully." });
-    clearProfileMsg();
-    setProfileDirty(false);
+      const updatedUser: DbUser = {
+        id: currentUserId,
+        fullName: response.full_name,
+        username: response.user_name,
+        nic: response.nic,
+        email: response.email,
+        phone: response.phone,
+        password: currentUser.password || "",
+        role: response.role === "Inventory Manager" ? "Manager" : response.role === "Sales" ? "Staff" : response.role,
+        active: response.is_active,
+        createdAt: response.created_at,
+        updatedAt: response.updated_at,
+      };
+
+      saveUserEdit(updatedUser);
+      sessionStorage.setItem("user", JSON.stringify(updatedUser));
+      setCurrentUser(updatedUser);
+
+      setProfileMsg({ type: "success", text: "Profile updated successfully." });
+      clearProfileMsg();
+      setProfileDirty(false);
+    } catch (err: any) {
+      setProfileMsg({ type: "error", text: err?.message || "Failed to update profile." });
+      clearProfileMsg();
+    }
   };
 
   // ── Save password ──
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
+    if (!currentUser) return;
+
     if (!passwordForm.oldPassword) {
       setPasswordMsg({
         type: "error",
@@ -246,15 +313,10 @@ export default function ProfilePage() {
       clearPasswordMsg();
       return;
     }
-    if (passwordForm.oldPassword !== currentUser?.password) {
-      setPasswordMsg({ type: "error", text: "Current password is incorrect." });
-      clearPasswordMsg();
-      return;
-    }
-    if (passwordForm.newPassword.length < 6) {
+    if (passwordForm.newPassword.length < 8) {
       setPasswordMsg({
         type: "error",
-        text: "New password must be at least 6 characters.",
+        text: "New password must be at least 8 characters.",
       });
       clearPasswordMsg();
       return;
@@ -273,17 +335,23 @@ export default function ProfilePage() {
       return;
     }
 
-    const updatedUser = {
-      ...currentUser,
-      password: passwordForm.newPassword,
-    } as import("../DataContext").User;
-    saveUserEdit(updatedUser);
-    sessionStorage.setItem("user", JSON.stringify(updatedUser));
-    setCurrentUser(updatedUser);
+    try {
+      const currentUserId = currentUser.id || (currentUser as any).userId;
+      await apiFetch<any>(`/users/${currentUserId}/password`, {
+        method: "PUT",
+        body: JSON.stringify({
+          current_password: passwordForm.oldPassword,
+          new_password: passwordForm.newPassword,
+        }),
+      });
 
-    setPasswordForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
-    setPasswordMsg({ type: "success", text: "Password changed successfully." });
-    clearPasswordMsg();
+      setPasswordForm({ oldPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordMsg({ type: "success", text: "Password changed successfully." });
+      clearPasswordMsg();
+    } catch (err: any) {
+      setPasswordMsg({ type: "error", text: err?.message || "Failed to update password." });
+      clearPasswordMsg();
+    }
   };
 
   const updateProfile = (key: string, value: string) =>
@@ -455,8 +523,8 @@ export default function ProfilePage() {
                 marginTop: 6,
                 padding: "3px 10px",
                 borderRadius: 20,
-                background: currentUser.active ? c.accentSoft : c.dangerSoft,
-                color: currentUser.active ? c.accent : c.danger,
+                background: c.accentSoft,
+                color: c.accent,
                 fontSize: 11.5,
                 fontWeight: 600,
               }}
@@ -466,29 +534,11 @@ export default function ProfilePage() {
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: currentUser.active ? c.accent : c.danger,
+                  background: c.accent,
                   display: "inline-block",
                 }}
               />
-              {currentUser.active ? "Active" : "Inactive"}
-            </div>
-          </div>
-          <div style={{ marginLeft: "auto", textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: c.textFaint, fontWeight: 500 }}>
-              ACCOUNT ID
-            </div>
-            <div
-              style={{
-                fontSize: 13.5,
-                fontWeight: 600,
-                color: c.textMuted,
-                marginTop: 2,
-              }}
-            >
-              {currentUser.id}
-            </div>
-            <div style={{ fontSize: 11, color: c.textFaint, marginTop: 6 }}>
-              Member since {currentUser.createdAt?.split(" ")[0] || "—"}
+              Active
             </div>
           </div>
         </div>

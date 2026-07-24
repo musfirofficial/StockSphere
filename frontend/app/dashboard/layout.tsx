@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { ThemeProvider, useTheme } from "./ThemeContext";
 import { DataProvider, useData } from "./DataContext";
+import { apiFetch } from "@/lib/api";
 
 const NAV_MAIN = [
   {
@@ -197,10 +198,21 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
     setMobileMenuOpen(false);
   }, [pathname]);
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("isLoggedIn");
-    sessionStorage.removeItem("user");
-    router.push("/");
+  const handleLogout = async () => {
+    try {
+      // Tell the backend to null out the refresh token in the DB
+      await apiFetch("/auth/logout", { method: "POST" });
+    } catch (err) {
+      // Even if the API call fails (e.g. token already expired),
+      // we still proceed with local cleanup so the user is never stuck
+      console.warn("Logout API call failed, proceeding with local cleanup:", err);
+    } finally {
+      sessionStorage.removeItem("isLoggedIn");
+      sessionStorage.removeItem("user");
+      sessionStorage.removeItem("access_token");
+      localStorage.removeItem("access_token");
+      router.push("/");
+    }
   };
 
   if (!isLoggedIn) {
@@ -508,44 +520,42 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                   {activeItem.key === "users"
                     ? "Users"
                     : activeItem.key === "suppliers"
-                    ? "Suppliers"
-                    : activeItem.key === "transactions"
-                    ? "Transactions"
-                    : activeItem.key === "stock_alerts"
-                    ? "Stock Alerts"
-                    : activeItem.key === "purchase_orders"
-                    ? "Purchase Orders"
-                    : activeItem.key === "items"
-                    ? "Inventory"
-                    : activeItem.key === "categories"
-                    ? "Categories"
-                    : activeItem.key === "reports"
-                    ? "Reports"
-                    : activeItem.key === "audit_logs"
-                    ? "Audit Logs"
-                    : activeItem.key === "profile"
-                    ? "Profile"
-                    : "Welcome back, " +
-                      (loggedInUser?.fullName?.split(" ")[0] || "Ravindu")}
+                      ? "Suppliers"
+                      : activeItem.key === "transactions"
+                        ? "Transactions"
+                        : activeItem.key === "stock_alerts"
+                          ? "Stock Alerts"
+                          : activeItem.key === "purchase_orders"
+                            ? "Purchase Orders"
+                            : activeItem.key === "items"
+                              ? "Inventory"
+                              : activeItem.key === "categories"
+                                ? "Categories"
+                                : activeItem.key === "reports"
+                                  ? "Reports"
+                                  : activeItem.key === "audit_logs"
+                                    ? "Audit Logs"
+                                    : activeItem.key === "profile"
+                                      ? "Profile"
+                                      : "Welcome back, " +
+                                      (loggedInUser?.fullName?.split(" ")[0] || "Musfir")}
                 </div>
                 <div style={{ fontSize: 13, color: c.textMuted, marginTop: 2 }}>
                   {activeItem.key === "users"
-                    ? `${userList.length} accounts · ${
-                        userList.filter((u) => u.active).length
-                      } active`
+                    ? "Manage Homerex staff accounts"
                     : activeItem.key === "suppliers"
-                    ? `${supplierList.length} suppliers · ${
-                        supplierList.filter((s) => s.active).length
-                      } active`
-                    : activeItem.key === "transactions"
-                    ? `${transactionList.length} total records`
-                    : activeItem.key === "stock_alerts"
-                    ? "Monitor items below safety stock levels"
-                    : activeItem.key === "purchase_orders"
-                    ? "Manage and generate supplier purchase orders"
-                    : activeItem.key === "items"
-                    ? "Manage and track warehouse stocks"
-                    : "Here's what's happening with your inventory today."}
+                      ? "Manage supplier accounts"
+                      : activeItem.key === "transactions"
+                        ? "Manage and track inventory transactions"
+                        : activeItem.key === "stock_alerts"
+                          ? "Monitor items below safety stock levels"
+                          : activeItem.key === "purchase_orders"
+                            ? "Manage and generate supplier purchase orders"
+                            : activeItem.key === "categories"
+                              ? "Manage inventroy stock categories"
+                              : activeItem.key === "items"
+                                ? "Manage and track warehouse stocks"
+                                : "Here's what's happening with your inventory today."}
                 </div>
               </div>
               {/* Page-specific action buttons injected by individual pages */}
@@ -575,35 +585,39 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                   {activeItem.key === "users"
                     ? "Users"
                     : activeItem.key === "suppliers"
-                    ? "Suppliers"
-                    : activeItem.key === "transactions"
-                    ? "Transactions"
-                    : activeItem.key === "stock_alerts"
-                    ? "Stock Alerts"
-                    : activeItem.key === "purchase_orders"
-                    ? "Purchase Orders"
-                    : activeItem.key === "items"
-                    ? "Inventory"
-                    : activeItem.key === "categories"
-                    ? "Categories"
-                    : activeItem.key === "reports"
-                    ? "Reports"
-                    : activeItem.key === "audit_logs"
-                    ? "Audit Logs"
-                    : activeItem.key === "profile"
-                    ? "Profile"
-                    : "Welcome back"}
+                      ? "Suppliers"
+                      : activeItem.key === "transactions"
+                        ? "Transactions"
+                        : activeItem.key === "stock_alerts"
+                          ? "Stock Alerts"
+                          : activeItem.key === "purchase_orders"
+                            ? "Purchase Orders"
+                            : activeItem.key === "items"
+                              ? "Inventory"
+                              : activeItem.key === "categories"
+                                ? "Categories"
+                                : activeItem.key === "reports"
+                                  ? "Reports"
+                                  : activeItem.key === "audit_logs"
+                                    ? "Audit Logs"
+                                    : activeItem.key === "profile"
+                                      ? "Profile"
+                                      : "Welcome back"}
                 </h2>
                 <p style={{ fontSize: 12, color: c.textMuted }}>
-                  {activeItem.key === "users" && `${userList.length} accounts`}
+                  {activeItem.key === "users" && "Manage Users"}
                   {activeItem.key === "suppliers" &&
-                    `${supplierList.length} suppliers`}
+                    "Manage suppliers"}
                   {activeItem.key === "transactions" &&
-                    `${transactionList.length} records`}
+                    "Manage inventory transactions"}
                   {activeItem.key === "stock_alerts" &&
                     `Monitor items below safety stock levels`}
                   {activeItem.key === "purchase_orders" &&
                     `Purchase Orders Management`}
+                  {activeItem.key === "items" &&
+                    `Manage warehouse stocks`}
+                  {activeItem.key === "categories" &&
+                    `Manage Inventory categories`}
                 </p>
               </div>
               {headerActions && (

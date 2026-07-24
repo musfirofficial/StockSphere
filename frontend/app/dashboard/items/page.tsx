@@ -587,19 +587,21 @@ export default function ItemsPage() {
 
   // Filter main inventory item list based on search and selected category/supplier filters
   const filteredItems = useMemo(() => {
-    return itemList.filter((item) => {
-      const q = itemSearch.toLowerCase();
-      const matchesSearch =
-        !q ||
-        item.itemName.toLowerCase().includes(q) ||
-        item.sku.toLowerCase().includes(q) ||
-        (item.description && item.description.toLowerCase().includes(q));
+    return itemList
+      .filter((item) => {
+        const q = itemSearch.toLowerCase();
+        const matchesSearch =
+          !q ||
+          item.itemName.toLowerCase().includes(q) ||
+          item.sku.toLowerCase().includes(q) ||
+          (item.description && item.description.toLowerCase().includes(q));
 
-      const matchesCategory = !selectedCategory || item.category === selectedCategory;
-      const matchesSupplier = !selectedSupplier || item.supplier === selectedSupplier;
+        const matchesCategory = !selectedCategory || item.category === selectedCategory;
+        const matchesSupplier = !selectedSupplier || item.supplier === selectedSupplier;
 
-      return matchesSearch && matchesCategory && matchesSupplier;
-    });
+        return matchesSearch && matchesCategory && matchesSupplier;
+      })
+      .sort((a, b) => a.itemName.localeCompare(b.itemName));
   }, [itemList, itemSearch, selectedCategory, selectedSupplier]);
 
   const totalCount = filteredItems.length;
@@ -1159,25 +1161,9 @@ export default function ItemsPage() {
                           style={{
                             padding: "11px 20px",
                             fontWeight: 600,
-                            color: item.quantity <= item.reorderLevel ? c.danger : c.text,
                           }}
                         >
                           {item.quantity} {item.unit}
-                          {item.quantity <= item.reorderLevel && (
-                            <span
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 700,
-                                color: c.danger,
-                                background: c.dangerSoft,
-                                padding: "1px 5px",
-                                borderRadius: 4,
-                                marginLeft: 6,
-                              }}
-                            >
-                              Low
-                            </span>
-                          )}
                         </td>
                         <td style={{ padding: "11px 20px" }}>
                           <StatusBadge active={item.active} c={c} />
@@ -1502,12 +1488,12 @@ export default function ItemsPage() {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                         <Field label="Created At" c={c}>
                           <div style={{ fontSize: 12, color: c.textFaint }}>
-                            {selectedItem.createdAt}
+                            {selectedItem.createdAt ? new Date(selectedItem.createdAt).toLocaleString() : "—"}
                           </div>
                         </Field>
                         <Field label="Updated At" c={c}>
                           <div style={{ fontSize: 12, color: c.textFaint }}>
-                            {selectedItem.updatedAt}
+                            {selectedItem.updatedAt ? new Date(selectedItem.updatedAt).toLocaleString() : "—"}
                           </div>
                         </Field>
                       </div>

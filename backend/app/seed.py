@@ -75,12 +75,14 @@ from app.models import (
     TransactionType,
     StockAlert,
     AlertStatus,
+    AuditLog,
+    AuditAction,
 )
 
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
-local_tz = timezone(timedelta(hours=5, minutes=30))
+local_tz = datetime.now().astimezone().tzinfo
 
 
 def hash_password(plain: str) -> str:
@@ -97,6 +99,7 @@ NUM_ITEMS = 150
 NUM_INACTIVE_ITEMS = 22
 TARGET_TRANSACTIONS = 1000
 BATCH_SIZE = 500
+DEFAULT_PASSWORD = "Password@123"  # used for all seeded users except musfir
 
 # --------------------------------------------------------------------------- #
 # Sri Lankan name / address pools
@@ -508,13 +511,35 @@ def gen_supplier_name(used: set) -> str:
             return name
 
 
+def gen_username(full_name: str, used: set) -> str:
+    base = full_name.lower().replace(" ", ".")
+    base = "".join(ch for ch in base if ch.isalnum() or ch in "._")
+    username = base
+    counter = 1
+    while username in used:
+        username = f"{base}{counter}"
+        counter += 1
+    used.add(username)
+    return username
+
+
+def pick_admin_or_im_creator(admin_ids, im_ids):
+    """Creator pool = the 2 admins + 1 inventory manager (randomly chosen
+    per call from the available IMs) - matches 'created by 2 admins and
+    1 IM' for category/supplier/item creation audit logs."""
+    pool = list(admin_ids)
+    if im_ids:
+        pool.append(random.choice(im_ids))
+    return random.choice(pool)
+
+
 def chunked(iterable, size):
     for i in range(0, len(iterable), size):
         yield iterable[i : i + size]
 
 
 def simulate_item_history(
-    item_id, supplier_id, reorder_level, count, user_id, resolve_probability=0.6
+    item_id, supplier_id, reorder_level, count, transaction_user_ids
 ):
     """
     Forward-simulates a realistic transaction history for one item, replaying
@@ -534,20 +559,23 @@ def simulate_item_history(
           alert closes)
         - active alert, new_stock < reorder  -> stays open as LOW_STOCK
 
-    Returns (final_quantity_in_stock, transaction_rows, alert_rows).
+    Every transaction's user_id is drawn randomly from `transaction_user_ids`
+    (only ADMIN/INVENTORY_MANAGER users, per business rule - SALES/AUDITOR
+    never perform stock transactions).
 
-    If the item still has an open alert after its random history plays out,
-    it is force-resolved with probability `resolve_probability` (one final
-    STOCK_IN "restock" transaction), so its current stock ends up healthy.
-    Otherwise the alert is left genuinely open (CRITICAL or LOW_STOCK) and
-    the item's current stock stays low/zero - this is what gives you a
-    realistic MIX of CRITICAL / LOW_STOCK / RESOLVED rows in stock_alerts
-    at once, matching a real point-in-time snapshot of the store.
+    Any alert still open at the end of this item's random history is ALWAYS
+    force-resolved here (one final restock transaction), so this function
+    never leaves an item unhealthy. The handful of items that should stay
+    genuinely CRITICAL/LOW_STOCK "as of now" are handled separately, on top
+    of this, by the caller - see craft_terminal_alert() below.
+
+    Returns (final_quantity_in_stock, transaction_rows, alert_rows, last_date).
+    `last_date` is None if this item had zero transactions.
     """
     starting_stock = reorder_level + random.randint(50, 150)
 
     if count == 0:
-        return starting_stock, [], []
+        return starting_stock, [], [], None
 
     dates = sorted(random_datetime_last_365_days() for _ in range(count))
 
@@ -556,22 +584,37 @@ def simulate_item_history(
     transaction_rows = []
     alert_rows = []
 
+    # Keep baseline STOCK_OUT quantities smaller within the last 30 days so
+    # this random history doesn't accidentally overshoot the ~1,000,000
+    # monthly sold-value target on its own - the dedicated top-up step
+    # (5c in seed_database) then tops it up precisely. Trimming after the
+    # fact isn't an option since that would break the previous/new
+    # quantity chain.
+    recent_cutoff = datetime.now(local_tz) - timedelta(days=30)
+
     for date in dates:
         # Mirrors: "if active and active.status == CRITICAL: raise 400"
         # i.e. a STOCK_OUT is impossible while at zero stock - only
         # restocking (STOCK_IN) can happen next.
+        is_recent = date >= recent_cutoff
         if active_alert and active_alert["status"] == AlertStatus.CRITICAL:
             t_type = TransactionType.STOCK_IN
         else:
+            # Bias harder toward STOCK_IN within the last 30 days too, so
+            # baseline sold value there stays small and predictable - the
+            # dedicated top-up step (5c) is what actually steers the
+            # monthly total toward the target, not this random walk.
+            weights = [25, 75] if is_recent else [65, 35]
             t_type = random.choices(
                 [TransactionType.STOCK_OUT, TransactionType.STOCK_IN],
-                weights=[65, 35],
+                weights=weights,
             )[0]
 
         prev_stock = current_stock
+        out_cap = 5 if is_recent else 50
 
         if t_type == TransactionType.STOCK_OUT:
-            max_out = min(current_stock, 50)
+            max_out = min(current_stock, out_cap)
             if max_out < 1:
                 t_type = TransactionType.STOCK_IN
                 qty = random.randint(5, 100)
@@ -625,7 +668,7 @@ def simulate_item_history(
             dict(
                 transaction_id=uuid.uuid4(),
                 item_id=item_id,
-                user_id=user_id,
+                user_id=random.choice(transaction_user_ids),
                 transaction_type=t_type,
                 quantity=qty,
                 previous_quantity=prev_stock,
@@ -635,13 +678,11 @@ def simulate_item_history(
             )
         )
 
-    # With probability resolve_probability, force-resolve any still-open
-    # alert (restocked -> current stock healthy). Otherwise, leave it open
-    # so the item is genuinely CRITICAL/LOW_STOCK right now - this is what
-    # produces a realistic mix across stock_alerts instead of everything
-    # ending up RESOLVED.
-    if active_alert and random.random() < resolve_probability:
-        last_date = dates[-1]
+    last_date = dates[-1]
+
+    # Always force-resolve any still-open alert here. Items chosen to stay
+    # genuinely CRITICAL/LOW_STOCK get that applied afterward by the caller.
+    if active_alert:
         resolve_date = min(
             last_date + timedelta(hours=random.randint(1, 48)),
             datetime.now(local_tz),
@@ -656,7 +697,7 @@ def simulate_item_history(
             dict(
                 transaction_id=uuid.uuid4(),
                 item_id=item_id,
-                user_id=user_id,
+                user_id=random.choice(transaction_user_ids),
                 transaction_type=TransactionType.STOCK_IN,
                 quantity=qty,
                 previous_quantity=current_stock,
@@ -669,8 +710,76 @@ def simulate_item_history(
         active_alert["status"] = AlertStatus.RESOLVED
         active_alert["resolved_at"] = resolve_date
         current_stock = new_stock
+        last_date = resolve_date
 
-    return current_stock, transaction_rows, alert_rows
+    return current_stock, transaction_rows, alert_rows, last_date
+
+
+def craft_terminal_alert(
+    item_id,
+    supplier_id,
+    reorder_level,
+    current_stock,
+    last_date,
+    target_status,
+    transaction_user_ids,
+):
+    """
+    Appends ONE final STOCK_OUT transaction that deliberately drops the item
+    into LOW_STOCK or CRITICAL and leaves it there - no resolving transaction
+    follows, so the alert stays genuinely active. Matches the example given:
+    item at 20, reorder 5, a stock-out to 4 creates LOW_STOCK; if nothing
+    stocks it back in, that alert simply stays active.
+    """
+    if target_status == AlertStatus.CRITICAL:
+        final_qty = 0
+    else:  # LOW_STOCK
+        final_qty = random.randint(1, max(reorder_level - 1, 1))
+
+    qty = current_stock - final_qty
+    now_ts = datetime.now(local_tz)
+    recent_cutoff = now_ts - timedelta(days=30)
+    base_date = last_date if last_date else (now_ts - timedelta(days=60))
+
+    if base_date < recent_cutoff:
+        # Keep this event dated BEFORE the last-30-days window so it
+        # doesn't affect the monthly sold-value target at all - the alert
+        # only needs to still be open today, not have been created today.
+        latest_safe = recent_cutoff - timedelta(hours=1)
+        earliest = base_date + timedelta(hours=1)
+        if earliest >= latest_safe:
+            event_date = earliest
+        else:
+            span_seconds = int((latest_safe - earliest).total_seconds())
+            event_date = earliest + timedelta(seconds=random.randint(0, span_seconds))
+    else:
+        # Item's last real transaction was already within the last 30
+        # days - can't date this before it, so it unavoidably falls in
+        # the revenue window this one time.
+        event_date = min(base_date + timedelta(hours=random.randint(1, 72)), now_ts)
+        if event_date <= base_date:
+            event_date = base_date + timedelta(minutes=1)
+
+    transaction_row = dict(
+        transaction_id=uuid.uuid4(),
+        item_id=item_id,
+        user_id=random.choice(transaction_user_ids),
+        transaction_type=TransactionType.STOCK_OUT,
+        quantity=qty,
+        previous_quantity=current_stock,
+        new_quantity=final_qty,
+        transaction_date=event_date,
+        note="Stock issued to customer",
+    )
+    alert_row = dict(
+        alert_id=uuid.uuid4(),
+        item_id=item_id,
+        supplier_id=supplier_id,
+        status=target_status,
+        created_at=event_date,
+        resolved_at=None,
+    )
+    return final_qty, transaction_row, alert_row
 
 
 # --------------------------------------------------------------------------- #
@@ -679,11 +788,30 @@ def simulate_item_history(
 async def seed_database() -> None:
     async with async_session_maker() as session:
 
-        # ---- Anchor check: only seed if categories table is empty ---- #
-        result = await session.execute(select(func.count()).select_from(Category))
-        category_count: int = result.scalar_one()
-        if category_count > 0:
-            print("Seed data already present - skipping seeding.")
+        # ---- Anchor check: only seed if ALL owned tables are empty ---- #
+        # Checking just `categories` isn't enough - if someone truncates
+        # categories but forgets suppliers/items, this used to pass the
+        # check and then crash halfway through on a duplicate key (e.g.
+        # supplier1@suppliers.lk already existing). Checking all of them
+        # catches that up front with a clear message instead.
+        counts = {}
+        for label, model in [
+            ("categories", Category),
+            ("suppliers", Supplier),
+            ("items", Item),
+        ]:
+            result = await session.execute(select(func.count()).select_from(model))
+            counts[label] = result.scalar_one()
+
+        if any(c > 0 for c in counts.values()):
+            non_empty = ", ".join(f"{k} ({v} rows)" for k, v in counts.items() if v > 0)
+            print(
+                f"Seed data already present in: {non_empty}. Skipping seeding.\n"
+                f"If you want a full reset, truncate ALL of these together first:\n"
+                f"  TRUNCATE TABLE stock_alerts, transactions, items, suppliers, "
+                f"categories RESTART IDENTITY CASCADE;\n"
+                f"  DELETE FROM users;"
+            )
             return
 
         used_phones: set = set()
@@ -692,37 +820,130 @@ async def seed_database() -> None:
         used_supplier_names: set = set()
 
         # ------------------------------------------------------------- #
-        # 1. musfir user (the ONLY user this script creates)
-        #    Checked independently of the categories anchor - if someone
-        #    only truncates categories (not users) and restarts, this
-        #    won't crash on a duplicate; it reuses the existing user_id.
+        # 1. Users - 10 total: 2 ADMIN (incl. musfir), 1 AUDITOR,
+        #    2 INVENTORY_MANAGER, 5 SALES. Only the 2 admins + 2 IMs ever
+        #    perform transactions (business rule) - their ids are
+        #    collected into transaction_user_ids below.
+        #
+        #    musfir is checked independently of the categories anchor, so
+        #    a partial truncate (categories only) won't crash on restart -
+        #    it reuses the existing musfir_id instead of re-inserting it.
+        #    The other 9 are only created when the anchor is empty.
         # ------------------------------------------------------------- #
-        existing_user = await session.execute(
-            select(User.user_id).where(User.user_name == "musfir")
-        )
-        existing_user_id = existing_user.scalar_one_or_none()
+        used_usernames: set = set()
 
-        if existing_user_id is not None:
-            musfir_id = existing_user_id
+        existing_user = await session.execute(
+            select(
+                User.user_id,
+                User.full_name,
+                User.user_name,
+                User.role,
+                User.created_at,
+            ).where(User.user_name == "musfir")
+        )
+        existing_row = existing_user.one_or_none()
+
+        transaction_user_ids = []  # admin + inventory_manager ids only
+        admin_ids = []
+        im_ids = []
+        all_users_info = []  # for audit log generation below
+        user_rows = []
+
+        if existing_row is not None:
+            (
+                musfir_id,
+                musfir_full_name,
+                musfir_username,
+                musfir_role,
+                musfir_created_at,
+            ) = existing_row
             print("musfir user already exists - reusing it.")
         else:
             musfir_id = uuid.uuid4()
-            ts = random_datetime_last_365_days()
-            await session.execute(
-                insert(User).values(
+            musfir_full_name = "Musfir Mohamed"
+            musfir_username = "musfir"
+            musfir_role = UserRole.ADMIN
+            musfir_created_at = random_datetime_last_365_days()
+            used_usernames.add("musfir")
+            user_rows.append(
+                dict(
                     user_id=musfir_id,
-                    full_name="Musfir Mohamed",
-                    user_name="musfir",
+                    full_name=musfir_full_name,
+                    user_name=musfir_username,
                     nic=gen_nic(used_nics),
                     email=gen_email("musfir", "lankahardware.lk", used_emails),
                     phone=gen_phone(used_phones),
-                    password_hash=hash_password("mustha"),
-                    role=UserRole.ADMIN,
+                    password_hash=hash_password(DEFAULT_PASSWORD),
+                    role=musfir_role,
+                    is_active=True,
+                    created_at=musfir_created_at,
+                    updated_at=musfir_created_at,
+                )
+            )
+
+        transaction_user_ids.append(musfir_id)
+        admin_ids.append(musfir_id)
+        all_users_info.append(
+            dict(
+                user_id=musfir_id,
+                full_name=musfir_full_name,
+                user_name=musfir_username,
+                role=musfir_role,
+                created_at=musfir_created_at,
+            )
+        )
+
+        # role plan for the other 9 users
+        other_roles = (
+            [UserRole.ADMIN] * 1
+            + [UserRole.INVENTORY_MANAGER] * 2
+            + [UserRole.AUDITOR] * 1
+            + [UserRole.SALES] * 5
+        )
+        for role in other_roles:
+            uid = uuid.uuid4()
+            full_name = gen_full_name()
+            username = gen_username(full_name, used_usernames)
+            ts = random_datetime_last_365_days()
+            user_rows.append(
+                dict(
+                    user_id=uid,
+                    full_name=full_name,
+                    user_name=username,
+                    nic=gen_nic(used_nics),
+                    email=gen_email(username, "lankahardware.lk", used_emails),
+                    phone=gen_phone(used_phones),
+                    password_hash=hash_password(DEFAULT_PASSWORD),
+                    role=role,
                     is_active=True,
                     created_at=ts,
                     updated_at=ts,
                 )
             )
+            all_users_info.append(
+                dict(
+                    user_id=uid,
+                    full_name=full_name,
+                    user_name=username,
+                    role=role,
+                    created_at=ts,
+                )
+            )
+            if role in (UserRole.ADMIN, UserRole.INVENTORY_MANAGER):
+                transaction_user_ids.append(uid)
+            if role == UserRole.ADMIN:
+                admin_ids.append(uid)
+            if role == UserRole.INVENTORY_MANAGER:
+                im_ids.append(uid)
+
+        if user_rows:
+            await session.execute(insert(User), user_rows)
+
+        print(
+            f"Users: {len(user_rows)} created this run "
+            f"(transaction-eligible users: {len(transaction_user_ids)} "
+            f"= 2 admin + 2 inventory manager)."
+        )
 
         # ------------------------------------------------------------- #
         # 2. Categories
@@ -849,7 +1070,8 @@ async def seed_database() -> None:
         # 5. Simulate transaction + alert history per item (~1000 total
         #    transactions), only for items that are active AND whose
         #    supplier is active. Alerts are created/resolved by replaying
-        #    the same state machine as sync_stock_alert().
+        #    the same state machine as sync_stock_alert(). Every
+        #    transaction's user_id is one of the 4 admin/IM users.
         # ------------------------------------------------------------- #
         eligible = [m for m in item_base if m["is_active"] and m["supplier_active"]]
 
@@ -858,21 +1080,31 @@ async def seed_database() -> None:
             meta = random.choice(eligible)
             counts_per_item[meta["item_id"]] += 1
 
+        # Make sure every item picked for a terminal alert actually gets at
+        # least a handful of transactions to build a believable history on
+        # top of.
+        for meta in random.sample(eligible, k=min(6, len(eligible))):
+            counts_per_item[meta["item_id"]] = max(counts_per_item[meta["item_id"]], 5)
+
         item_rows = []
         transaction_rows = []
         alert_rows = []
+        last_date_by_item = {}
+        stock_by_item = {}
 
         for meta in item_base:
             count = counts_per_item.get(meta["item_id"], 0)
-            final_qty, tx_rows, alerts = simulate_item_history(
+            final_qty, tx_rows, alerts, last_date = simulate_item_history(
                 item_id=meta["item_id"],
                 supplier_id=meta["supplier_id"],
                 reorder_level=meta["reorder_level"],
                 count=count,
-                user_id=musfir_id,
+                transaction_user_ids=transaction_user_ids,
             )
             transaction_rows.extend(tx_rows)
             alert_rows.extend(alerts)
+            last_date_by_item[meta["item_id"]] = last_date
+            stock_by_item[meta["item_id"]] = final_qty
 
             item_rows.append(
                 dict(
@@ -894,6 +1126,140 @@ async def seed_database() -> None:
                 )
             )
 
+        # ------------------------------------------------------------- #
+        # 5b. Deterministically leave exactly 6 alerts ACTIVE: 4 LOW_STOCK
+        #     and 2 CRITICAL. Every other alert generated above already
+        #     ended up RESOLVED. Each of these 6 gets one final STOCK_OUT
+        #     that creates the alert, with nothing after it to resolve it -
+        #     same pattern as your example (20 -> -16 -> LOW_STOCK, and if
+        #     no stock-in ever follows, it just stays active).
+        # ------------------------------------------------------------- #
+        item_rows_by_id = {row["item_id"]: row for row in item_rows}
+        recent_cutoff_for_selection = datetime.now(local_tz) - timedelta(days=30)
+        # only items with a healthy current buffer make good candidates;
+        # prefer ones whose last real transaction is already outside the
+        # last-30-days window so their terminal alert doesn't land inside
+        # it and skew the monthly sold-value target.
+        all_candidates = [
+            m for m in eligible if stock_by_item[m["item_id"]] > m["reorder_level"] + 10
+        ]
+        quiet_candidates = [
+            m
+            for m in all_candidates
+            if not last_date_by_item.get(m["item_id"])
+            or last_date_by_item[m["item_id"]] < recent_cutoff_for_selection
+        ]
+        candidates = quiet_candidates if len(quiet_candidates) >= 6 else all_candidates
+        random.shuffle(candidates)
+        targets = [AlertStatus.LOW_STOCK] * 4 + [AlertStatus.CRITICAL] * 2
+        chosen = candidates[: len(targets)]
+
+        for meta, target_status in zip(chosen, targets):
+            item_id = meta["item_id"]
+            final_qty, tx_row, alert_row = craft_terminal_alert(
+                item_id=item_id,
+                supplier_id=meta["supplier_id"],
+                reorder_level=meta["reorder_level"],
+                current_stock=stock_by_item[item_id],
+                last_date=last_date_by_item[item_id],
+                target_status=target_status,
+                transaction_user_ids=transaction_user_ids,
+            )
+            transaction_rows.append(tx_row)
+            alert_rows.append(alert_row)
+            item_rows_by_id[item_id]["quantity_in_stock"] = final_qty
+
+        # ------------------------------------------------------------- #
+        # 5c. Top up the last 30 days' STOCK_OUT sold value to ~LKR
+        #     1,000,000. Done as ADDITIONAL sale transactions appended to
+        #     the tail of each chosen item's timeline (never rewriting
+        #     existing transactions), so:
+        #       - per-item continuity still holds (new tx's
+        #         previous_quantity is exactly that item's current
+        #         tracked stock)
+        #       - the 6 deliberately open alerts (chosen/targets above)
+        #         are left completely untouched
+        #       - no item is ever sold below reorder_level + a safety
+        #         buffer, so no NEW alerts get accidentally created
+        # ------------------------------------------------------------- #
+        MONTHLY_SOLD_VALUE_TARGET = Decimal("1000000")
+        REORDER_SAFETY_BUFFER = 10
+        now_ts = datetime.now(local_tz)
+        last_30_days_cutoff = now_ts - timedelta(days=30)
+
+        selling_price_by_item = {
+            row["item_id"]: row["selling_price"] for row in item_rows
+        }
+        reorder_level_by_item = {m["item_id"]: m["reorder_level"] for m in item_base}
+        excluded_item_ids = {
+            meta["item_id"] for meta in chosen
+        }  # the 6 designated alerts
+
+        current_sold_value = sum(
+            (Decimal(t["quantity"]) * selling_price_by_item[t["item_id"]])
+            for t in transaction_rows
+            if t["transaction_type"] == TransactionType.STOCK_OUT
+            and t["transaction_date"] >= last_30_days_cutoff
+        )
+        shortfall = MONTHLY_SOLD_VALUE_TARGET - current_sold_value
+
+        topup_pool = [m for m in eligible if m["item_id"] not in excluded_item_ids]
+        topup_count = 0
+        guard = 0
+
+        while shortfall > 0 and topup_pool and guard < 3000:
+            guard += 1
+            meta = random.choice(topup_pool)
+            item_id = meta["item_id"]
+            price = selling_price_by_item[item_id]
+            if price <= 0:
+                continue
+
+            reorder_level = reorder_level_by_item[item_id]
+            current_stock = stock_by_item[item_id]
+            max_sellable = current_stock - reorder_level - REORDER_SAFETY_BUFFER
+            if max_sellable < 1:
+                continue
+
+            max_qty_by_price = int(shortfall / price) + 1
+            qty = max(1, min(max_sellable, max_qty_by_price, 100))
+            new_stock = current_stock - qty
+
+            last_dt = last_date_by_item.get(item_id)
+            window_start = (
+                last_dt
+                if (last_dt and last_dt > last_30_days_cutoff)
+                else last_30_days_cutoff
+            )
+            if window_start >= now_ts:
+                window_start = now_ts - timedelta(hours=1)
+            span_seconds = max(int((now_ts - window_start).total_seconds()), 60)
+            event_date = window_start + timedelta(
+                seconds=random.randint(0, span_seconds)
+            )
+
+            transaction_rows.append(
+                dict(
+                    transaction_id=uuid.uuid4(),
+                    item_id=item_id,
+                    user_id=random.choice(transaction_user_ids),
+                    transaction_type=TransactionType.STOCK_OUT,
+                    quantity=qty,
+                    previous_quantity=current_stock,
+                    new_quantity=new_stock,
+                    transaction_date=event_date,
+                    note="Stock issued to customer",
+                )
+            )
+
+            stock_by_item[item_id] = new_stock
+            last_date_by_item[item_id] = event_date
+            item_rows_by_id[item_id]["quantity_in_stock"] = new_stock
+            shortfall -= Decimal(qty) * price
+            topup_count += 1
+
+        achieved_sold_value = MONTHLY_SOLD_VALUE_TARGET - shortfall
+
         await session.execute(insert(Item), item_rows)
 
         if alert_rows:
@@ -902,6 +1268,177 @@ async def seed_database() -> None:
 
         for batch in chunked(transaction_rows, BATCH_SIZE):
             await session.execute(insert(Transaction), batch)
+
+        # ------------------------------------------------------------- #
+        # 6. Audit logs
+        # ------------------------------------------------------------- #
+        audit_log_rows = []
+
+        def add_audit(
+            user_id,
+            action,
+            description,
+            target_table,
+            target_id,
+            created_at,
+            old_value=None,
+            new_value=None,
+        ):
+            audit_log_rows.append(
+                dict(
+                    log_id=uuid.uuid4(),
+                    user_id=user_id,
+                    action=action,
+                    description=description,
+                    target_table=target_table,
+                    target_id=target_id,
+                    old_value=old_value,
+                    new_value=new_value,
+                    created_at=created_at,
+                )
+            )
+
+        # 6a. Login / logout - ~50 logs across all 10 users, random dates.
+        #     target_id stays None here, matching your actual crud
+        #     (AuditlogCreate never sets it for login/logout).
+        for _ in range(50):
+            u = random.choice(all_users_info)
+            action = random.choice(
+                [AuditAction.LOGIN_SUCCESS, AuditAction.LOGOUT_SUCCESS]
+            )
+            verb = "logged in" if action == AuditAction.LOGIN_SUCCESS else "logged out"
+            add_audit(
+                user_id=u["user_id"],
+                action=action,
+                description=(
+                    f"User {u['full_name']} ({u['user_name']}) with role "
+                    f"{u['role'].value} {verb} successfully."
+                ),
+                target_table="users",
+                target_id=None,
+                created_at=random_datetime_last_365_days(),
+            )
+
+        # 6b. User create - one per user, always by musfir, created_at ==
+        #     that user's own created_at exactly.
+        for u in all_users_info:
+            add_audit(
+                user_id=musfir_id,
+                action=AuditAction.USER_CREATE,
+                description=(
+                    f"Created user {u['full_name']} ({u['user_name']}) "
+                    f"with role {u['role'].value}."
+                ),
+                target_table="users",
+                target_id=u["user_id"],
+                created_at=u["created_at"],
+            )
+
+        # 6c. Category create - one per category, exact created_at,
+        #     creator = 2 admins + 1 IM pool.
+        for row in category_rows:
+            add_audit(
+                user_id=pick_admin_or_im_creator(admin_ids, im_ids),
+                action=AuditAction.CATEGORY_CREATE,
+                description=f"Created category '{row['category_name']}'.",
+                target_table="categories",
+                target_id=row["category_id"],
+                created_at=row["created_at"],
+            )
+
+        # 6d. Supplier create - same rule as categories.
+        for row in supplier_rows:
+            add_audit(
+                user_id=pick_admin_or_im_creator(admin_ids, im_ids),
+                action=AuditAction.SUPPLIER_CREATE,
+                description=f"Created supplier '{row['supplier_name']}'.",
+                target_table="suppliers",
+                target_id=row["supplier_id"],
+                created_at=row["created_at"],
+            )
+
+        # 6e. Supplier deactivate - only the inactive suppliers, always by
+        #     musfir, dated after that supplier's created_at.
+        for row in supplier_rows:
+            if not row["is_active"]:
+                deact_time = min(
+                    row["created_at"]
+                    + timedelta(
+                        days=random.randint(1, 60), hours=random.randint(0, 23)
+                    ),
+                    datetime.now(local_tz),
+                )
+                add_audit(
+                    user_id=musfir_id,
+                    action=AuditAction.SUPPLIER_DEACTIVATE,
+                    description=f"Deactivated supplier '{row['supplier_name']}'.",
+                    target_table="suppliers",
+                    target_id=row["supplier_id"],
+                    created_at=deact_time,
+                )
+
+        # 6f. Item create - same rule as categories/suppliers.
+        for row in item_rows:
+            add_audit(
+                user_id=pick_admin_or_im_creator(admin_ids, im_ids),
+                action=AuditAction.ITEM_CREATE,
+                description=f"Created item '{row['item_name']}' (SKU {row['sku']}).",
+                target_table="items",
+                target_id=row["item_id"],
+                created_at=row["created_at"],
+            )
+
+        # 6g. Item deactivate - only the inactive items, always by musfir,
+        #     dated after that item's created_at.
+        for row in item_rows:
+            if not row["is_active"]:
+                deact_time = min(
+                    row["created_at"]
+                    + timedelta(
+                        days=random.randint(1, 60), hours=random.randint(0, 23)
+                    ),
+                    datetime.now(local_tz),
+                )
+                add_audit(
+                    user_id=musfir_id,
+                    action=AuditAction.ITEM_DEACTIVATE,
+                    description=f"Deactivated item '{row['item_name']}'.",
+                    target_table="items",
+                    target_id=row["item_id"],
+                    created_at=deact_time,
+                )
+
+        # 6h. Item price update - 20 random items, NO actual price change
+        #     in the items table. new_value is set to that item's real
+        #     current cost_price; old_value is a fabricated prior price
+        #     (+/-15%) purely for the log entry.
+        price_change_items = random.sample(item_rows, k=min(20, len(item_rows)))
+        for row in price_change_items:
+            current_cost = row["cost_price"]
+            variation = Decimal(str(round(random.uniform(0.85, 1.15), 2)))
+            old_cost = (current_cost * variation).quantize(Decimal("0.01"))
+            if old_cost == current_cost:
+                old_cost = current_cost + Decimal("1.00")
+            log_time = min(
+                row["created_at"] + timedelta(days=random.randint(1, 300)),
+                datetime.now(local_tz),
+            )
+            add_audit(
+                user_id=pick_admin_or_im_creator(admin_ids, im_ids),
+                action=AuditAction.ITEM_PRICE_UPDATE,
+                description=(
+                    f"Updated cost price of item '{row['item_name']}' "
+                    f"from LKR {old_cost} to LKR {current_cost}."
+                ),
+                target_table="items",
+                target_id=row["item_id"],
+                created_at=log_time,
+                old_value=str(old_cost),
+                new_value=str(current_cost),
+            )
+
+        for batch in chunked(audit_log_rows, BATCH_SIZE):
+            await session.execute(insert(AuditLog), batch)
 
         await session.commit()
 
@@ -914,12 +1451,19 @@ async def seed_database() -> None:
         resolved_count = sum(
             1 for a in alert_rows if a["status"] == AlertStatus.RESOLVED
         )
+        tx_by_user = defaultdict(int)
+        for t in transaction_rows:
+            tx_by_user[t["user_id"]] += 1
         print(
-            f"Seed complete: 1 user, {len(category_rows)} categories, "
+            f"Seed complete: {len(user_rows)} new users, {len(category_rows)} categories, "
             f"{len(supplier_rows)} suppliers, {len(item_rows)} items, "
-            f"{len(transaction_rows)} transactions, {len(alert_rows)} alerts "
-            f"({critical_count} critical, {low_stock_count} low stock, "
-            f"{resolved_count} resolved)."
+            f"{len(transaction_rows)} transactions across {len(tx_by_user)} users, "
+            f"{len(alert_rows)} alerts total "
+            f"({critical_count} active critical, {low_stock_count} active low stock, "
+            f"{resolved_count} resolved). "
+            f"Last 30 days sold value: LKR {achieved_sold_value:,.2f} "
+            f"(target 1,000,000; {topup_count} top-up sale transactions added). "
+            f"{len(audit_log_rows)} audit log entries created."
         )
 
 
@@ -927,3 +1471,19 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(seed_database())
+
+"""
+TRUNCATE TABLE 
+    audit_logs,
+    categories,
+    items,
+    purchase_order_items,
+    purchase_orders,
+    reports,
+    stock_alerts,
+    suppliers,
+    transactions,
+    users
+RESTART IDENTITY 
+CASCADE;
+"""

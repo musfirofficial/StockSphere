@@ -34,6 +34,7 @@ export interface Supplier {
 
 export interface Transaction {
   id: string;
+  itemId: string;
   item: string;
   type: "Stock in" | "Stock out";
   qty: number; // positive for Stock in, negative for Stock out
@@ -101,14 +102,13 @@ interface DataContextType {
   deleteItem: (id: string) => void;
 
   recordTransactions: (
-    txs: Array<{ item: string; type: "Stock in" | "Stock out"; qty: number }>,
-    currentUser: string
-  ) => void;
+    txs: Array<{ item: string; type: "Stock in" | "Stock out"; qty: number; note?: string }>
+  ) => Promise<{ success: boolean; error?: string; completed: number }>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-// ── Mock Data Helper ────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────
 const getFormattedDateTime = (daysAgo = 0) => {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
@@ -126,12 +126,19 @@ export const INIT_CATEGORIES: Category[] = [];
 export const INIT_ITEMS: Item[] = [];
 
 // Helper to get current quantity of an item from a list of transactions
+// Falls back to item.quantity from itemList (real DB stock), then 0.
 export const getItemCurrentQty = (
   itemName: string,
-  transactions: Transaction[]
+  transactions: Transaction[],
+  items?: Item[]
 ): number => {
   const latestTx = transactions.find((t) => t.item === itemName);
-  return latestTx ? latestTx.newQty ?? 0 : 500; // baseline of 500 units if no transaction history
+  if (latestTx) return latestTx.newQty ?? 0;
+  if (items) {
+    const item = items.find((i) => i.itemName === itemName);
+    if (item) return item.quantity;
+  }
+  return 0;
 };
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
@@ -147,35 +154,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   // Fetch initial data from FastAPI backend
   const fetchAllBackendData = async () => {
     try {
-      const [items, categories, suppliers] = await Promise.allSettled([
+      const [items, categories, suppliers, users, transactions] = await Promise.allSettled([
         apiFetch<any[]>("/items/"),
         apiFetch<any[]>("/categories/"),
         apiFetch<any[]>("/suppliers/"),
+        apiFetch<any[]>("/users/"),
+        apiFetch<any[]>("/transaction/"),
       ]);
 
-      if (items.status === "fulfilled") {
-        const formattedItems: Item[] = items.value.map((i: any) => ({
-          id: i.item_id,
-          sku: i.sku,
-          itemName: i.item_name,
-          description: i.description || "",
-          category: i.category_id,
-          supplier: i.supplier_id,
-          quantity: i.quantity_in_stock,
-          unit: i.unit,
-          costPrice: i.cost_price,
-          sellingPrice: i.selling_price,
-          reorderLevel: i.reorder_level,
-          reorderQuantity: i.reorder_quantity,
-          active: i.is_active,
-          createdAt: i.created_at,
-          updatedAt: i.updated_at,
-        }));
-        setItemList(formattedItems);
-      }
-
+      let formattedCategories: Category[] = [];
       if (categories.status === "fulfilled") {
-        const formattedCategories: Category[] = categories.value.map((c: any) => ({
+        formattedCategories = categories.value.map((c: any) => ({
           id: c.category_id,
           name: c.category_name,
           description: c.description || "",
@@ -186,21 +175,108 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setCategoryList(formattedCategories);
       }
 
+      let formattedSuppliers: Supplier[] = [];
       if (suppliers.status === "fulfilled") {
-        const formattedSuppliers: Supplier[] = suppliers.value.map((s: any) => ({
+        formattedSuppliers = suppliers.value.map((s: any) => ({
           id: s.supplier_id,
           supplierName: s.supplier_name,
           contactPerson: s.contact_person || "",
           phone: s.phone || "",
           email: s.email || "",
           address: s.address || "",
-          active: s.is_active,
+          active: s.is_active ?? true,
           createdAt: s.created_at,
           updatedAt: s.updated_at,
           notes: s.notes || "",
-          totalSupplies: 0,
+          totalSupplies: s.total_supplies || 0,
         }));
         setSupplierList(formattedSuppliers);
+      }
+
+      // ── Users ──
+      let userMap = new Map<string, string>(); // user_id -> full_name
+      if (users.status === "fulfilled") {
+        const formattedUsers: User[] = users.value.map((u: any) => ({
+          id: u.user_id,
+          fullName: u.full_name,
+          username: u.user_name,
+          nic: u.nic,
+          email: u.email,
+          phone: u.phone,
+          password: "",
+          role: u.role,
+          active: u.is_active,
+          createdAt: u.created_at,
+          updatedAt: u.updated_at,
+        }));
+        setUserList(formattedUsers);
+        userMap = new Map(formattedUsers.map((u) => [u.id, u.fullName]));
+      }
+
+      // ── Items ──
+      let formattedItems: Item[] = [];
+      if (items.status === "fulfilled") {
+        const catMap = new Map(formattedCategories.map((c) => [c.id, c.name]));
+        const suppMap = new Map(formattedSuppliers.map((s) => [s.id, s.supplierName]));
+
+        formattedItems = items.value.map((i: any) => {
+          const categoryName = catMap.get(i.category_id) || i.category_name || i.category_id;
+          const supplierName = suppMap.get(i.supplier_id) || i.supplier_name || i.supplier_id;
+
+          return {
+            id: i.item_id,
+            sku: i.sku,
+            itemName: i.item_name,
+            description: i.description || "",
+            category: categoryName,
+            supplier: supplierName,
+            quantity: i.quantity_in_stock,
+            unit: i.unit,
+            costPrice: i.cost_price,
+            sellingPrice: i.selling_price,
+            reorderLevel: i.reorder_level,
+            reorderQuantity: i.reorder_quantity,
+            active: i.is_active,
+            createdAt: i.created_at,
+            updatedAt: i.updated_at,
+          };
+        });
+        setItemList(formattedItems);
+      }
+
+      // ── Transactions ──
+      if (transactions.status === "fulfilled") {
+        const itemIdMap = new Map(formattedItems.map((i) => [i.id, i.itemName]));
+        const formatDate = (iso: string) => {
+          const d = new Date(iso);
+          const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          const pad = (n: number) => n.toString().padStart(2, "0");
+          return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+        const formattedTransactions: Transaction[] = transactions.value.map((t: any) => {
+          const isIn = t.transaction_type === "STOCK_IN";
+          const itemName = itemIdMap.get(t.item_id) || t.item_id;
+          const userName = userMap.get(t.user_id) || "Unknown";
+          return {
+            id: t.transaction_id,
+            itemId: t.item_id,
+            item: itemName,
+            type: isIn ? "Stock in" : "Stock out",
+            qty: isIn ? t.quantity : -t.quantity,
+            user: userName,
+            date: formatDate(t.transaction_date),
+            prevQty: t.previous_quantity,
+            newQty: t.new_quantity,
+          };
+        });
+        // Sort newest first using raw ISO dates
+        const rawDates = new Map<string, string>(
+          transactions.value.map((t: any) => [t.transaction_id, t.transaction_date])
+        );
+        formattedTransactions.sort(
+          (a, b) => new Date(rawDates.get(b.id) ?? 0).getTime() - new Date(rawDates.get(a.id) ?? 0).getTime()
+        );
+        setTransactionList(formattedTransactions);
       }
     } catch (e) {
       console.error("Failed fetching background data:", e);
@@ -306,57 +382,71 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setItemList((prev) => prev.filter((x) => x.id !== id));
   };
 
-  const recordTransactions = (
-    txs: Array<{ item: string; type: "Stock in" | "Stock out"; qty: number }>,
-    currentUser: string
-  ) => {
-    // Current Local time formatting: 12 Jul 14:10
-    const now = new Date();
-    const months = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
+  const recordTransactions = async (
+    txs: Array<{ item: string; type: "Stock in" | "Stock out"; qty: number; note?: string }>
+  ): Promise<{ success: boolean; error?: string; completed: number }> => {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     const pad = (n: number) => n.toString().padStart(2, "0");
-    const dateStr = `${pad(now.getDate())} ${months[now.getMonth()]} ${pad(
-      now.getHours()
-    )}:${pad(now.getMinutes())}`;
+    const formatDate = (iso: string) => {
+      const d = new Date(iso);
+      return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
 
-    // Note: We need to calculate each sequentially because one transaction might affect the next if they're for the same item.
-    // However, to keep it simple, we retrieve the start states, apply cumulative changes per item.
-    let tempTransactions = [...transactionList];
     const newTxRecords: Transaction[] = [];
+    let completed = 0;
 
-    txs.forEach((tx, idx) => {
-      const prevQty = getItemCurrentQty(tx.item, tempTransactions);
-      const qtyChange = tx.type === "Stock in" ? tx.qty : -tx.qty;
-      const newQty = prevQty + qtyChange;
+    for (const tx of txs) {
+      // Find item by name to get its UUID
+      const matchedItem = itemList.find((i) => i.itemName === tx.item);
+      if (!matchedItem) {
+        return { success: false, error: `Item not found: "${tx.item}"`, completed };
+      }
 
-      const newRecord: Transaction = {
-        id: `TX-${2292 + tempTransactions.length}`,
-        item: tx.item,
-        type: tx.type,
-        qty: qtyChange,
-        user: currentUser || "R. Fernando",
-        date: dateStr,
-        prevQty,
-        newQty,
-      };
+      try {
+        const res = await apiFetch<any>("/transaction/", {
+          method: "POST",
+          body: JSON.stringify({
+            item_id: matchedItem.id,
+            transaction_type: tx.type === "Stock in" ? "STOCK_IN" : "STOCK_OUT",
+            quantity: tx.qty,
+            note: tx.note ?? null,
+          }),
+        });
 
-      newTxRecords.push(newRecord);
-      tempTransactions = [newRecord, ...tempTransactions];
-    });
+        // Map response to Transaction
+        const isIn = res.transaction_type === "STOCK_IN";
+        // Get logged-in user's name from userList
+        const userEntry = userList.find((u) => u.id === res.user_id);
+        const userName = userEntry?.fullName ?? "You";
 
-    setTransactionList((prev) => [...newTxRecords, ...prev]);
+        const newRecord: Transaction = {
+          id: res.transaction_id,
+          itemId: res.item_id,
+          item: tx.item,
+          type: isIn ? "Stock in" : "Stock out",
+          qty: isIn ? res.quantity : -res.quantity,
+          user: userName,
+          date: formatDate(res.transaction_date),
+          prevQty: res.previous_quantity,
+          newQty: res.new_quantity,
+        };
+
+        newTxRecords.push(newRecord);
+        // Also update the item's quantity in itemList so projected stock is correct within this batch
+        setItemList((prev) =>
+          prev.map((i) =>
+            i.id === matchedItem.id ? { ...i, quantity: res.new_quantity } : i
+          )
+        );
+        completed++;
+      } catch (err: any) {
+        const msg = err?.message || "Unknown error";
+        return { success: false, error: `"${tx.item}": ${msg}`, completed };
+      }
+    }
+
+    setTransactionList((prev) => [...newTxRecords.reverse(), ...prev]);
+    return { success: true, completed };
   };
 
   if (!loaded) {

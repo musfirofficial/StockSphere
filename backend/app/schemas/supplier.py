@@ -66,6 +66,7 @@ class SupplierUpdate(BaseModel):
 # ------------------------- Supplier response schema ------------------------- #
 class SupplierResponse(SupplierBase):
     supplier_id: uuid.UUID
+    is_active: bool
     created_at: datetime
     updated_at: datetime
     total_supplies: int

@@ -20,12 +20,40 @@ from app.services.report_generator import generate_po_pdf_document
 
 from app.schemas.purchaseorder import (
     PurchaseOrderCreate,
+    PurchaseOrderResponse,
     PurchaseOrderItemResponse,
     PurchaseOrderItemCreate,
     PurchaseOrderItemUpdate,
 )
 
 router = APIRouter(prefix="/purchas-orders", tags=["purchaseorders"])
+
+
+# ----------------------- Endpoint for get all reports ----------------------- #
+@router.get("/", response_model=list[PurchaseOrderResponse])
+async def get_all_purchase_orders(
+    db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(
+        RoleChecker(
+            [
+                UserRole.ADMIN,
+                UserRole.INVENTORY_MANAGER,
+            ]
+        )
+    ),
+):
+    p_orders = await crud_po.get_all_purchase_orders(db)
+    return [
+        PurchaseOrderResponse(
+            po_id=po.po_id,
+            supplier_id=po.supplier_id,
+            supplier_name=po.supplier.supplier_name,
+            po_type=po.po_type,
+            created_at=po.created_at,
+            created_by=po.user.full_name if po.user else None,
+        )
+        for po in p_orders
+    ]
 
 
 # -------------------- Endpoint for auto generated drafts -------------------- #
@@ -109,7 +137,7 @@ async def create_manual_draft_po(
     existing_draft = await crud_po.get_existing_draft_po(db, payload.supplier_id)
     if existing_draft:
         return {
-            "message": "An open draft already exists for this supplier. Redirecting...",
+            "message": "An open draft already exists for this supplier.",
             "po_id": existing_draft.po_id,
             "is_new": False,
         }

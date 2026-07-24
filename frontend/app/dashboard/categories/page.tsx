@@ -1,7 +1,19 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Search,
+  Plus,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  Check,
+  Folder,
+} from "lucide-react";
 import { useTheme } from "../ThemeContext";
+import { useData } from "../DataContext";
 import { apiFetch } from "@/lib/api";
 
 export interface Category {
@@ -12,20 +24,381 @@ export interface Category {
   updated_at: string;
 }
 
+// ── Checkbox ───────────────────────────────────────────────
+function Cb({
+  checked,
+  onChange,
+  c,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  c: any;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }}
+      style={{
+        width: 17,
+        height: 17,
+        borderRadius: 5,
+        flexShrink: 0,
+        border: `1.5px solid ${checked ? c.accent : c.border}`,
+        background: checked ? c.accent : "transparent",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        padding: 0,
+      }}
+    >
+      {checked && <Check size={11} strokeWidth={3} color="#fff" />}
+    </button>
+  );
+}
+
+// ── Modal ──────────────────────────────────────────────────
+interface ModalProps {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  c: any;
+  width?: number;
+}
+function Modal({ title, onClose, children, c, width = 440 }: ModalProps) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(10,10,8,0.5)",
+        zIndex: 999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width,
+          maxWidth: "100%",
+          background: c.surface,
+          border: `1px solid ${c.border}`,
+          borderRadius: 14,
+          padding: 22,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 18,
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{title}</span>
+          <button
+            onClick={onClose}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              border: "none",
+              background: c.surfaceMuted,
+              color: c.textMuted,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface FieldProps {
+  label: string;
+  c: any;
+  children: React.ReactNode;
+}
+function Field({ label, c, children }: FieldProps) {
+  return (
+    <div>
+      <label
+        style={{
+          fontSize: 12,
+          fontWeight: 500,
+          color: c.textMuted,
+          display: "block",
+          marginBottom: 5,
+        }}
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const inp = (c: any) => ({
+  width: "100%",
+  padding: "8px 11px",
+  borderRadius: 8,
+  border: `1px solid ${c.border}`,
+  background: c.inputBg,
+  color: c.text,
+  fontSize: 13.5,
+  outline: "none",
+  boxSizing: "border-box" as const,
+  fontFamily: "inherit",
+});
+
+// ── Category Modal (Create / Edit) ──────────────────────────────────
+interface CategoryModalProps {
+  initialData?: Category | null;
+  onClose: () => void;
+  onSave: (data: { category_name: string; description: string }) => Promise<void> | void;
+  c: any;
+}
+function CategoryModal({ initialData, onClose, onSave, c }: CategoryModalProps) {
+  const [categoryName, setCategoryName] = useState(initialData?.category_name || "");
+  const [description, setDescription] = useState(initialData?.description || "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    setError("");
+    if (!categoryName.trim()) {
+      setError("Category name is required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave({ category_name: categoryName, description });
+      onClose();
+    } catch (err: any) {
+      setError(err.message || "Failed to save category");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={initialData ? "Edit Category" : "Create New Category"}
+      onClose={onClose}
+      c={c}
+      width={440}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {error && (
+          <div
+            style={{
+              padding: "8px 12px",
+              background: c.dangerSoft,
+              color: c.danger,
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 500,
+            }}
+          >
+            {error}
+          </div>
+        )}
+        <Field label="Category Name *" c={c}>
+          <input
+            style={inp(c)}
+            value={categoryName}
+            onChange={(e) => setCategoryName(e.target.value)}
+            placeholder="e.g. Tools & Hardware"
+            autoFocus
+          />
+        </Field>
+        <Field label="Description" c={c}>
+          <textarea
+            style={{ ...inp(c), height: 80, resize: "vertical" }}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Brief description of category..."
+          />
+        </Field>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 12,
+          }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: `1px solid ${c.border}`,
+              background: c.surface,
+              color: c.text,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 8,
+              border: "none",
+              background: c.accent,
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {saving ? "Saving..." : initialData ? "Save changes" : "Add category"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Delete Category Confirmation Modal ──────────────────────
+interface DeleteCategoryModalProps {
+  category: Category;
+  onClose: () => void;
+  onConfirm: () => void;
+  c: any;
+}
+function DeleteCategoryModal({
+  category,
+  onClose,
+  onConfirm,
+  c,
+}: DeleteCategoryModalProps) {
+  return (
+    <Modal title="Delete category" onClose={onClose} c={c} width={380}>
+      <p
+        style={{
+          fontSize: 13.5,
+          color: c.textMuted,
+          lineHeight: 1.6,
+          marginBottom: 20,
+        }}
+      >
+        Delete{" "}
+        <span style={{ color: c.text, fontWeight: 600 }}>
+          {category.category_name}
+        </span>
+        ? This action cannot be undone.
+      </p>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button
+          onClick={onClose}
+          style={{
+            padding: "8px 14px",
+            borderRadius: 8,
+            border: `1px solid ${c.border}`,
+            background: c.surface,
+            color: c.text,
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 8,
+            border: "none",
+            background: c.danger,
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          Delete category
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Main Page Component ─────────────────────────────────────
 export default function CategoriesPage() {
   const { c } = useTheme();
+  const { setHeaderActions } = useData();
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [categorySearch, setCategorySearch] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
 
   // Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
-  const [categoryName, setCategoryName] = useState("");
-  const [description, setDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 8;
+
+  // Header button
+  useEffect(() => {
+    setHeaderActions(
+      <button
+        onClick={() => setIsAddModalOpen(true)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          background: c.accent,
+          color: "#fff",
+          border: "none",
+          padding: "8px 14px",
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        <Plus size={15} /> New category
+      </button>
+    );
+    return () => setHeaderActions(null);
+  }, [c, setHeaderActions]);
 
   // Fetch categories from backend
   const loadCategories = async () => {
@@ -45,361 +418,478 @@ export default function CategoriesPage() {
     loadCategories();
   }, []);
 
-  const openAddModal = () => {
-    setEditingCategory(null);
-    setCategoryName("");
-    setDescription("");
-    setFormError("");
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (cat: Category) => {
-    setEditingCategory(cat);
-    setCategoryName(cat.category_name);
-    setDescription(cat.description || "");
-    setFormError("");
-    setIsModalOpen(true);
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError("");
-    setSaving(true);
-
-    try {
-      if (editingCategory) {
-        // Update
-        await apiFetch(`/categories/${editingCategory.category_id}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            category_name: categoryName,
-            description: description || undefined,
-          }),
-        });
-      } else {
-        // Create
-        await apiFetch("/categories/", {
-          method: "POST",
-          body: JSON.stringify({
-            category_name: categoryName,
-            description: description || undefined,
-          }),
-        });
-      }
-      setIsModalOpen(false);
-      loadCategories();
-    } catch (err: any) {
-      setFormError(err.message || "Operation failed");
-    } finally {
-      setSaving(false);
+  const handleSaveCategory = async (data: { category_name: string; description: string }) => {
+    if (editingCategory) {
+      await apiFetch(`/categories/${editingCategory.category_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          category_name: data.category_name,
+          description: data.description || undefined,
+        }),
+      });
+    } else {
+      await apiFetch("/categories/", {
+        method: "POST",
+        body: JSON.stringify({
+          category_name: data.category_name,
+          description: data.description || undefined,
+        }),
+      });
     }
+    loadCategories();
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this category?")) return;
+  const handleDeleteConfirm = async () => {
+    if (!categoryToDelete) return;
     try {
-      await apiFetch(`/categories/${id}`, { method: "DELETE" });
+      await apiFetch(`/categories/${categoryToDelete.category_id}`, { method: "DELETE" });
+      setSelected((prev) => prev.filter((x) => x !== categoryToDelete.category_id));
+      setCategoryToDelete(null);
       loadCategories();
     } catch (err: any) {
       alert(err.message || "Failed to delete category");
     }
   };
 
-  const filteredCategories = categories.filter(
-    (cat) =>
-      cat.category_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (cat.description && cat.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Filter categories
+  const filteredCategories = useMemo(() => {
+    const q = categorySearch.toLowerCase().trim();
+    const list = !q
+      ? categories
+      : categories.filter(
+          (cat) =>
+            cat.category_name.toLowerCase().includes(q) ||
+            (cat.description && cat.description.toLowerCase().includes(q))
+        );
+    return [...list].sort((a, b) => a.category_name.localeCompare(b.category_name));
+  }, [categories, categorySearch]);
+
+  const totalCount = filteredCategories.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const pageCategories = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredCategories.slice(start, start + PAGE_SIZE);
+  }, [filteredCategories, page]);
+
+  const allPageSelected =
+    pageCategories.length > 0 &&
+    pageCategories.every((cat) => selected.includes(cat.category_id));
+
+  const toggleOne = (id: string, checked: boolean) => {
+    setSelected((prev) =>
+      checked ? [...prev, id] : prev.filter((x) => x !== id)
+    );
+  };
+
+  const toggleAllPage = () => {
+    const pageIds = pageCategories.map((cat) => cat.category_id);
+    if (allPageSelected) {
+      setSelected((prev) => prev.filter((x) => !pageIds.includes(x)));
+    } else {
+      setSelected((prev) => {
+        const next = [...prev];
+        pageIds.forEach((id) => {
+          if (!next.includes(id)) next.push(id);
+        });
+        return next;
+      });
+    }
+  };
+
+  const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: 40 }}>
-      {/* Header Bar */}
+    <div style={{ position: "relative", height: "100%", width: "100%" }}>
       <div
         style={{
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 12,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: c.text }}>Category Management</h1>
-          <p style={{ fontSize: 13, color: c.textMuted, marginTop: 4 }}>
-            Organize inventory items into distinct categories.
-          </p>
-        </div>
-        <button
-          onClick={openAddModal}
-          style={{
-            background: c.accent,
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            padding: "9px 16px",
-            fontSize: 13.5,
-            fontWeight: 600,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          + Add Category
-        </button>
-      </div>
-
-      {/* Search Bar */}
-      <div style={{ maxWidth: 400 }}>
-        <input
-          type="text"
-          placeholder="Search categories..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "9px 14px",
-            borderRadius: 8,
-            border: `1px solid ${c.border}`,
-            background: c.surface,
-            color: c.text,
-            fontSize: 13.5,
-            outline: "none",
-          }}
-        />
-      </div>
-
-      {error && (
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            background: c.dangerSoft,
-            color: c.danger,
-            fontSize: 13.5,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {/* Categories Table */}
-      <div
-        style={{
-          background: c.surface,
-          border: `1px solid ${c.border}`,
-          borderRadius: 12,
+          height: "100%",
+          gap: 20,
+          position: "relative",
           overflow: "hidden",
         }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-          <thead>
-            <tr
-              style={{
-                borderBottom: `1px solid ${c.border}`,
-                background: c.surfaceMuted,
-                fontSize: 12,
-                color: c.textMuted,
-                textTransform: "uppercase",
-              }}
-            >
-              <th style={{ padding: "12px 16px" }}>Category Name</th>
-              <th style={{ padding: "12px 16px" }}>Description</th>
-              <th style={{ padding: "12px 16px" }}>Created At</th>
-              <th style={{ padding: "12px 16px", textAlign: "right" }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={4} style={{ padding: 30, textAlign: "center", color: c.textMuted }}>
-                  Loading categories...
-                </td>
-              </tr>
-            ) : filteredCategories.length === 0 ? (
-              <tr>
-                <td colSpan={4} style={{ padding: 30, textAlign: "center", color: c.textMuted }}>
-                  No categories found.
-                </td>
-              </tr>
-            ) : (
-              filteredCategories.map((cat) => (
-                <tr
-                  key={cat.category_id}
-                  style={{
-                    borderBottom: `1px solid ${c.border}`,
-                    fontSize: 13.5,
-                    color: c.text,
-                  }}
-                >
-                  <td style={{ padding: "14px 16px", fontWeight: 600 }}>{cat.category_name}</td>
-                  <td style={{ padding: "14px 16px", color: c.textMuted }}>
-                    {cat.description || "-"}
-                  </td>
-                  <td style={{ padding: "14px 16px", color: c.textMuted }}>
-                    {new Date(cat.created_at).toLocaleDateString()}
-                  </td>
-                  <td style={{ padding: "14px 16px", textAlign: "right" }}>
-                    <button
-                      onClick={() => openEditModal(cat)}
-                      style={{
-                        marginRight: 8,
-                        padding: "4px 10px",
-                        border: `1px solid ${c.border}`,
-                        background: "transparent",
-                        color: c.text,
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        fontSize: 12,
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(cat.category_id)}
-                      style={{
-                        padding: "4px 10px",
-                        border: "none",
-                        background: "#fee2e2",
-                        color: "#991b1b",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        fontSize: 12,
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Add / Edit Modal */}
-      {isModalOpen && (
+        {/* Table List Section */}
         <div
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
+            flex: 1,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
+            flexDirection: "column",
+            minWidth: 0,
+            height: "100%",
+            background: c.surface,
+            border: `1px solid ${c.border}`,
+            borderRadius: 14,
+            overflow: "hidden",
           }}
         >
+          {/* Toolbar */}
           <div
             style={{
-              background: c.surface,
-              border: `1px solid ${c.border}`,
-              borderRadius: 14,
-              padding: 24,
-              width: "100%",
-              maxWidth: 450,
               display: "flex",
-              flexDirection: "column",
-              gap: 16,
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "13px 20px",
+              borderBottom: `1px solid ${c.border}`,
+              flexWrap: "wrap",
+              gap: 10,
             }}
           >
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: c.text }}>
-              {editingCategory ? "Edit Category" : "Add New Category"}
-            </h2>
-
-            {formError && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                flex: 1,
+                minWidth: 250,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Cb checked={allPageSelected} onChange={toggleAllPage} c={c} />
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    color: c.textMuted,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {selected.length > 0
+                    ? `${selected.length} selected`
+                    : "Select all"}
+                </span>
+              </div>
+              {selected.length > 0 && (
+                <button
+                  onClick={() => setSelected([])}
+                  style={{
+                    fontSize: 12.5,
+                    color: c.textMuted,
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontWeight: 500,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Deselect all
+                </button>
+              )}
+              {/* Search bar */}
               <div
                 style={{
-                  padding: 10,
-                  borderRadius: 6,
-                  background: "#fee2e2",
-                  color: "#991b1b",
-                  fontSize: 12.5,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: `1px solid ${c.border}`,
+                  background: c.inputBg,
+                  maxWidth: 260,
+                  width: "100%",
+                  marginLeft: "auto",
                 }}
               >
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 12.5, fontWeight: 600, color: c.textMuted, display: "block", marginBottom: 4 }}>
-                  Category Name *
-                </label>
+                <Search size={14} color={c.textFaint} />
                 <input
-                  type="text"
-                  required
-                  value={categoryName}
-                  onChange={(e) => setCategoryName(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: `1px solid ${c.border}`,
-                    background: c.surface,
-                    color: c.text,
-                    fontSize: 13.5,
+                  value={categorySearch}
+                  onChange={(e) => {
+                    setCategorySearch(e.target.value);
+                    setPage(1);
                   }}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: 12.5, fontWeight: 600, color: c.textMuted, display: "block", marginBottom: 4 }}>
-                  Description
-                </label>
-                <textarea
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Search categories..."
                   style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: `1px solid ${c.border}`,
-                    background: c.surface,
-                    color: c.text,
-                    fontSize: 13.5,
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: 8,
-                    border: `1px solid ${c.border}`,
+                    border: "none",
+                    outline: "none",
                     background: "transparent",
                     color: c.text,
                     fontSize: 13,
-                    cursor: "pointer",
+                    width: "100%",
+                    fontFamily: "inherit",
                   }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  style={{
-                    padding: "8px 16px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: c.accent,
-                    color: "#fff",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {saving ? "Saving..." : editingCategory ? "Save Changes" : "Create Category"}
-                </button>
+                />
               </div>
-            </form>
+            </div>
+          </div>
+
+          {error && (
+            <div
+              style={{
+                margin: 16,
+                padding: 12,
+                borderRadius: 8,
+                background: c.dangerSoft,
+                color: c.danger,
+                fontSize: 13,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {/* Table */}
+          <div style={{ overflowX: "auto", flex: 1 }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 13,
+                minWidth: 500,
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    color: c.textFaint,
+                    textAlign: "left",
+                    background: c.surfaceMuted,
+                  }}
+                >
+                  <th
+                    style={{
+                      width: 48,
+                      padding: "10px 20px",
+                      fontWeight: 500,
+                      fontSize: 11.5,
+                    }}
+                  />
+                  {["Category", "Description", "Actions"].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: "10px 20px",
+                        fontWeight: 500,
+                        fontSize: 11.5,
+                        textAlign: h === "Actions" ? "right" : "left",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      style={{
+                        padding: "32px 20px",
+                        textAlign: "center",
+                        color: c.textFaint,
+                      }}
+                    >
+                      Loading categories...
+                    </td>
+                  </tr>
+                ) : pageCategories.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      style={{
+                        padding: "32px 20px",
+                        textAlign: "center",
+                        color: c.textFaint,
+                      }}
+                    >
+                      No categories found.
+                    </td>
+                  </tr>
+                ) : (
+                  pageCategories.map((cat) => (
+                    <tr
+                      key={cat.category_id}
+                      style={{
+                        borderTop: `1px solid ${c.border}`,
+                        transition: "background 0.1s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = c.surfaceMuted;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <td
+                        style={{ padding: "11px 20px" }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Cb
+                          checked={selected.includes(cat.category_id)}
+                          onChange={(v) => toggleOne(cat.category_id, v)}
+                          c={c}
+                        />
+                      </td>
+                      <td style={{ padding: "11px 20px", fontWeight: 600 }}>
+                        {cat.category_name}
+                      </td>
+                      <td style={{ padding: "11px 20px", color: c.textMuted }}>
+                        {cat.description || "-"}
+                      </td>
+                      <td
+                        style={{ padding: "11px 20px", textAlign: "right" }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 6,
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <button
+                            onClick={() => setEditingCategory(cat)}
+                            title="Edit category"
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 7,
+                              border: `1px solid ${c.border}`,
+                              background: c.surface,
+                              color: c.textMuted,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => setCategoryToDelete(cat)}
+                            title="Delete category"
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 7,
+                              border: `1px solid ${c.border}`,
+                              background: c.surface,
+                              color: c.danger,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Bar */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "13px 20px",
+              borderTop: `1px solid ${c.border}`,
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: 12, color: c.textFaint }}>
+              Showing {totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
+              {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} categories
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 7,
+                  border: `1px solid ${c.border}`,
+                  background: c.surface,
+                  color: c.textMuted,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: page === 1 ? "default" : "pointer",
+                  opacity: page === 1 ? 0.4 : 1,
+                }}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              {pageNums.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setPage(n)}
+                  style={{
+                    minWidth: 28,
+                    height: 28,
+                    borderRadius: 7,
+                    padding: "0 6px",
+                    border: `1px solid ${n === page ? c.accent : c.border}`,
+                    background: n === page ? c.accentSoft : c.surface,
+                    color: n === page ? c.accent : c.textMuted,
+                    fontSize: 12.5,
+                    fontWeight: n === page ? 600 : 500,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 7,
+                  border: `1px solid ${c.border}`,
+                  background: c.surface,
+                  color: c.textMuted,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: page === totalPages ? "default" : "pointer",
+                  opacity: page === totalPages ? 0.4 : 1,
+                }}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Add Category Modal */}
+      {isAddModalOpen && (
+        <CategoryModal
+          onClose={() => setIsAddModalOpen(false)}
+          onSave={handleSaveCategory}
+          c={c}
+        />
+      )}
+
+      {/* Edit Category Modal */}
+      {editingCategory && (
+        <CategoryModal
+          initialData={editingCategory}
+          onClose={() => setEditingCategory(null)}
+          onSave={handleSaveCategory}
+          c={c}
+        />
+      )}
+
+      {/* Delete Category Confirmation Modal */}
+      {categoryToDelete && (
+        <DeleteCategoryModal
+          category={categoryToDelete}
+          onClose={() => setCategoryToDelete(null)}
+          onConfirm={handleDeleteConfirm}
+          c={c}
+        />
       )}
     </div>
   );
 }
+

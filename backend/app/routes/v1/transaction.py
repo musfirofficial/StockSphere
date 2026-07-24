@@ -52,6 +52,11 @@ async def create_new_transaction(
         item.quantity_in_stock += transaction_in.quantity
 
     elif transaction_in.transaction_type == TransactionType.STOCK_OUT:
+        if transaction_in.quantity > item.quantity_in_stock:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock: requested {transaction_in.quantity}, available {item.quantity_in_stock}"
+            )
         item.quantity_in_stock -= transaction_in.quantity
     
     new_quantity = item.quantity_in_stock

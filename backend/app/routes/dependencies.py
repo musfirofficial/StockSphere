@@ -176,7 +176,9 @@ async def verify_uniqueness(db, model, schema_in, exclude_id=None):
 
         # Exclude current record if updating
         if exclude_id is not None:
-            query = query.where(model.id != exclude_id)
+            # Get the actual PK column name (e.g., 'user_id', 'category_id', etc.)
+            pk_col = mapper.mapper.primary_key[0]
+            query = query.where(pk_col != exclude_id)
 
         result = await db.execute(query)
         conflict = result.scalar_one_or_none()

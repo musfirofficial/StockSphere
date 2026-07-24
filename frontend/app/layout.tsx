@@ -19,6 +19,9 @@ const inter = localFont({
 export const metadata: Metadata = {
   title: "StockSphere - Inventory Management System",
   description: "StockSphere: Advanced inventory management dashboard for modern warehouses.",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
