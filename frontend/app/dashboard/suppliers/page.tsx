@@ -15,6 +15,7 @@ import {
 import { useTheme } from "../ThemeContext";
 import { useData, Supplier } from "../DataContext";
 import { apiFetch } from "@/lib/api";
+import { isReadOnly } from "@/lib/roles";
 
 // ── Checkbox ───────────────────────────────────────────────
 function Cb({
@@ -435,7 +436,10 @@ function DeleteSupplierModal({
 // ── Main Page Component ─────────────────────────────────────
 export default function SuppliersPage() {
   const { mode, c } = useTheme();
-  const { supplierList, setSupplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier } = useData();
+  const { supplierList, setSupplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier, loggedInUser } = useData();
+
+  // Derive read-only mode from role
+  const readOnly = isReadOnly(loggedInUser?.role ?? "", "suppliers");
 
   // Selected checkbox rows
   const [selected, setSelected] = useState<string[]>([]);
@@ -466,8 +470,12 @@ export default function SuppliersPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Dynamically set header buttons in shared layout
+  // Dynamically set header buttons in shared layout — hidden for read-only roles
   useEffect(() => {
+    if (readOnly) {
+      setHeaderActions(null);
+      return;
+    }
     setHeaderActions(
       <button
         onClick={() => setAddSupplierOpen(true)}
@@ -490,7 +498,7 @@ export default function SuppliersPage() {
       </button>
     );
     return () => setHeaderActions(null);
-  }, [c, setHeaderActions]);
+  }, [c, setHeaderActions, readOnly]);
 
   // Sync details panel state
   useEffect(() => {
@@ -783,7 +791,7 @@ export default function SuppliersPage() {
                     "Contact person",
                     "Email",
                     "Status",
-                    "Actions",
+                    ...(readOnly ? [] : ["Actions"]),
                   ].map((h) => (
                     <th
                       key={h}
@@ -863,47 +871,49 @@ export default function SuppliersPage() {
                           style={{ padding: "11px 20px" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button
-                              onClick={() => {
-                                setSelectedSupplier(s);
-                                setIsEditingSupplier(true);
-                              }}
-                              title="Edit supplier"
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 7,
-                                border: `1px solid ${c.border}`,
-                                background: c.surface,
-                                color: c.textMuted,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              onClick={() => setSupplierToDelete(s)}
-                              title="Delete supplier"
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 7,
-                                border: `1px solid ${c.border}`,
-                                background: c.surface,
-                                color: c.danger,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
+                          {!readOnly && (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button
+                                onClick={() => {
+                                  setSelectedSupplier(s);
+                                  setIsEditingSupplier(true);
+                                }}
+                                title="Edit supplier"
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 7,
+                                  border: `1px solid ${c.border}`,
+                                  background: c.surface,
+                                  color: c.textMuted,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              <button
+                                onClick={() => setSupplierToDelete(s)}
+                                title="Delete supplier"
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 7,
+                                  border: `1px solid ${c.border}`,
+                                  background: c.surface,
+                                  color: c.danger,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1279,26 +1289,28 @@ export default function SuppliersPage() {
               >
                 {!isEditingSupplier ? (
                   <>
-                    <button
-                      onClick={() => setIsEditingSupplier(true)}
-                      style={{
-                        flex: 1,
-                        padding: "9px",
-                        borderRadius: 8,
-                        border: `1px solid ${c.border}`,
-                        background: c.surface,
-                        color: c.text,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <Pencil size={13} /> Edit Details
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => setIsEditingSupplier(true)}
+                        style={{
+                          flex: 1,
+                          padding: "9px",
+                          borderRadius: 8,
+                          border: `1px solid ${c.border}`,
+                          background: c.surface,
+                          color: c.text,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Pencil size={13} /> Edit Details
+                      </button>
+                    )}
                     <button
                       onClick={() => setSelectedSupplier(null)}
                       style={{

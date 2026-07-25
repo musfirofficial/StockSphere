@@ -26,6 +26,7 @@ import {
 import { ThemeProvider, useTheme } from "./ThemeContext";
 import { DataProvider, useData } from "./DataContext";
 import { apiFetch } from "@/lib/api";
+import { getAllowedNavKeys } from "@/lib/roles";
 
 const NAV_MAIN = [
   {
@@ -367,7 +368,9 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
               paddingRight: 2,
             }}
           >
-            {NAV_MAIN.map((item) => (
+            {NAV_MAIN
+              .filter((item) => getAllowedNavKeys(loggedInUser?.role ?? "Admin").includes(item.key as any))
+              .map((item) => (
               <NavItem
                 key={item.key}
                 item={item}

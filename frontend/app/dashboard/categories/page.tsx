@@ -15,6 +15,7 @@ import {
 import { useTheme } from "../ThemeContext";
 import { useData } from "../DataContext";
 import { apiFetch } from "@/lib/api";
+import { isReadOnly } from "@/lib/roles";
 
 export interface Category {
   category_id: string;
@@ -357,7 +358,10 @@ function DeleteCategoryModal({
 // ── Main Page Component ─────────────────────────────────────
 export default function CategoriesPage() {
   const { c } = useTheme();
-  const { setHeaderActions } = useData();
+  const { setHeaderActions, loggedInUser } = useData();
+
+  // Derive read-only mode from role
+  const readOnly = isReadOnly(loggedInUser?.role ?? "", "categories");
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -374,8 +378,12 @@ export default function CategoriesPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 8;
 
-  // Header button
+  // Header button — hidden for read-only roles
   useEffect(() => {
+    if (readOnly) {
+      setHeaderActions(null);
+      return;
+    }
     setHeaderActions(
       <button
         onClick={() => setIsAddModalOpen(true)}
@@ -398,7 +406,7 @@ export default function CategoriesPage() {
       </button>
     );
     return () => setHeaderActions(null);
-  }, [c, setHeaderActions]);
+  }, [c, setHeaderActions, readOnly]);
 
   // Fetch categories from backend
   const loadCategories = async () => {
@@ -652,7 +660,7 @@ export default function CategoriesPage() {
                       fontSize: 11.5,
                     }}
                   />
-                  {["Category", "Description", "Actions"].map((h) => (
+                  {["Category", "Description", ...(readOnly ? [] : ["Actions"])].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -729,50 +737,52 @@ export default function CategoriesPage() {
                         style={{ padding: "11px 20px", textAlign: "right" }}
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 6,
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          <button
-                            onClick={() => setEditingCategory(cat)}
-                            title="Edit category"
+                        {!readOnly && (
+                          <div
                             style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 7,
-                              border: `1px solid ${c.border}`,
-                              background: c.surface,
-                              color: c.textMuted,
                               display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
+                              gap: 6,
+                              justifyContent: "flex-end",
                             }}
                           >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => setCategoryToDelete(cat)}
-                            title="Delete category"
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 7,
-                              border: `1px solid ${c.border}`,
-                              background: c.surface,
-                              color: c.danger,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                            <button
+                              onClick={() => setEditingCategory(cat)}
+                              title="Edit category"
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 7,
+                                border: `1px solid ${c.border}`,
+                                background: c.surface,
+                                color: c.textMuted,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => setCategoryToDelete(cat)}
+                              title="Delete category"
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 7,
+                                border: `1px solid ${c.border}`,
+                                background: c.surface,
+                                color: c.danger,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))

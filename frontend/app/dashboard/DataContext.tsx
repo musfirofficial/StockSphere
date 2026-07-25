@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { apiFetch } from "@/lib/api";
 
 // ── Types ──────────────────────────────────────────────────
@@ -149,171 +149,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [categoryList, setCategoryList] = useState<Category[]>([]);
   const [headerActions, setHeaderActions] = useState<React.ReactNode>(null);
   const [loggedInUser, setLoggedInUser] = useState<User | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  // Fetch initial data from FastAPI backend
-  const fetchAllBackendData = async () => {
-    try {
-      const [items, categories, suppliers, users, transactions] = await Promise.allSettled([
-        apiFetch<any[]>("/items/"),
-        apiFetch<any[]>("/categories/"),
-        apiFetch<any[]>("/suppliers/"),
-        apiFetch<any[]>("/users/"),
-        apiFetch<any[]>("/transaction/"),
-      ]);
-
-      let formattedCategories: Category[] = [];
-      if (categories.status === "fulfilled") {
-        formattedCategories = categories.value.map((c: any) => ({
-          id: c.category_id,
-          name: c.category_name,
-          description: c.description || "",
-          active: true,
-          createdAt: c.created_at,
-          updatedAt: c.updated_at,
-        }));
-        setCategoryList(formattedCategories);
-      }
-
-      let formattedSuppliers: Supplier[] = [];
-      if (suppliers.status === "fulfilled") {
-        formattedSuppliers = suppliers.value.map((s: any) => ({
-          id: s.supplier_id,
-          supplierName: s.supplier_name,
-          contactPerson: s.contact_person || "",
-          phone: s.phone || "",
-          email: s.email || "",
-          address: s.address || "",
-          active: s.is_active ?? true,
-          createdAt: s.created_at,
-          updatedAt: s.updated_at,
-          notes: s.notes || "",
-          totalSupplies: s.total_supplies || 0,
-        }));
-        setSupplierList(formattedSuppliers);
-      }
-
-      // ── Users ──
-      let userMap = new Map<string, string>(); // user_id -> full_name
-      if (users.status === "fulfilled") {
-        const formattedUsers: User[] = users.value.map((u: any) => ({
-          id: u.user_id,
-          fullName: u.full_name,
-          username: u.user_name,
-          nic: u.nic,
-          email: u.email,
-          phone: u.phone,
-          password: "",
-          role: u.role,
-          active: u.is_active,
-          createdAt: u.created_at,
-          updatedAt: u.updated_at,
-        }));
-        setUserList(formattedUsers);
-        userMap = new Map(formattedUsers.map((u) => [u.id, u.fullName]));
-      }
-
-      // ── Items ──
-      let formattedItems: Item[] = [];
-      if (items.status === "fulfilled") {
-        const catMap = new Map(formattedCategories.map((c) => [c.id, c.name]));
-        const suppMap = new Map(formattedSuppliers.map((s) => [s.id, s.supplierName]));
-
-        formattedItems = items.value.map((i: any) => {
-          const categoryName = catMap.get(i.category_id) || i.category_name || i.category_id;
-          const supplierName = suppMap.get(i.supplier_id) || i.supplier_name || i.supplier_id;
-
-          return {
-            id: i.item_id,
-            sku: i.sku,
-            itemName: i.item_name,
-            description: i.description || "",
-            category: categoryName,
-            supplier: supplierName,
-            quantity: i.quantity_in_stock,
-            unit: i.unit,
-            costPrice: i.cost_price,
-            sellingPrice: i.selling_price,
-            reorderLevel: i.reorder_level,
-            reorderQuantity: i.reorder_quantity,
-            active: i.is_active,
-            createdAt: i.created_at,
-            updatedAt: i.updated_at,
-          };
-        });
-        setItemList(formattedItems);
-      }
-
-      // ── Transactions ──
-      if (transactions.status === "fulfilled") {
-        const itemIdMap = new Map(formattedItems.map((i) => [i.id, i.itemName]));
-        const formatDate = (iso: string) => {
-          const d = new Date(iso);
-          const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-          const pad = (n: number) => n.toString().padStart(2, "0");
-          return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        };
-        const formattedTransactions: Transaction[] = transactions.value.map((t: any) => {
-          const isIn = t.transaction_type === "STOCK_IN";
-          const itemName = itemIdMap.get(t.item_id) || t.item_id;
-          const userName = userMap.get(t.user_id) || "Unknown";
-          return {
-            id: t.transaction_id,
-            itemId: t.item_id,
-            item: itemName,
-            type: isIn ? "Stock in" : "Stock out",
-            qty: isIn ? t.quantity : -t.quantity,
-            user: userName,
-            date: formatDate(t.transaction_date),
-            prevQty: t.previous_quantity,
-            newQty: t.new_quantity,
-          };
-        });
-        // Sort newest first using raw ISO dates
-        const rawDates = new Map<string, string>(
-          transactions.value.map((t: any) => [t.transaction_id, t.transaction_date])
-        );
-        formattedTransactions.sort(
-          (a, b) => new Date(rawDates.get(b.id) ?? 0).getTime() - new Date(rawDates.get(a.id) ?? 0).getTime()
-        );
-        setTransactionList(formattedTransactions);
-      }
-    } catch (e) {
-      console.error("Failed fetching background data:", e);
-    } finally {
-      setLoaded(true);
-    }
-  };
-
-  useEffect(() => {
-    fetchAllBackendData();
-  }, []);
-
-  // Save changes to local storage
-  useEffect(() => {
-    if (!loaded) return;
-    sessionStorage.setItem("userList", JSON.stringify(userList));
-  }, [userList, loaded]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    sessionStorage.setItem("supplierList", JSON.stringify(supplierList));
-  }, [supplierList, loaded]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    sessionStorage.setItem("transactionList", JSON.stringify(transactionList));
-  }, [transactionList, loaded]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    sessionStorage.setItem("itemList", JSON.stringify(itemList));
-  }, [itemList, loaded]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    sessionStorage.setItem("categoryList", JSON.stringify(categoryList));
-  }, [categoryList, loaded]);
 
   // Operations
   const addUser = (u: any) => {
@@ -448,10 +283,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setTransactionList((prev) => [...newTxRecords.reverse(), ...prev]);
     return { success: true, completed };
   };
-
-  if (!loaded) {
-    return null;
-  }
 
   return (
     <DataContext.Provider
