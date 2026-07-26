@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { useTheme } from "./ThemeContext";
 import { useData } from "./DataContext";
+import { showDraftPOCard, showActiveAlertsCard } from "@/lib/roles";
 
 // ── Stat card ──────────────────────────────────────────────
 interface StatCardProps {
@@ -131,9 +132,14 @@ function parseTxDate(dateStr: string): Date {
 
 export default function DashboardOverview() {
   const { c } = useTheme();
-  const { transactionList, userList, supplierList, itemList } = useData();
+  const { transactionList, userList, supplierList, itemList, loggedInUser } = useData();
   const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+
+  // Role-based card visibility
+  const role = loggedInUser?.role ?? "Admin";
+  const showDraftPO = showDraftPOCard(role);
+  const showAlerts = showActiveAlertsCard(role);
 
   useEffect(() => {
     setMounted(true);
@@ -209,12 +215,13 @@ export default function DashboardOverview() {
 
   return (
     <div>
+      {/* Stat Cards — shown based on role */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: isMobile
             ? "1fr"
-            : "repeat(2, 1fr) 1.2fr 1.2fr",
+            : `repeat(${2 + (showAlerts ? 1 : 0) + (showDraftPO ? 1 : 0)}, 1fr)`,
           gap: 14,
           marginBottom: 22,
         }}
@@ -227,27 +234,36 @@ export default function DashboardOverview() {
           icon={Boxes}
           tone="accent"
         />
+        {showAlerts && (
+          <StatCard
+            c={c}
+            label="Active alerts"
+            value={activeAlertsCount.toString()}
+            sub={`${lowStockCount} low stock · ${outOfStockCount} out of stock`}
+            icon={AlertTriangle}
+            tone="warn"
+          />
+        )}
+        {showDraftPO && (
+          <StatCard
+            c={c}
+            label="Draft POs"
+            value="0"
+            sub="Awaiting approval"
+            icon={ClipboardList}
+            tone="accent"
+          />
+        )}
         <StatCard
           c={c}
-          label="Active alerts"
-          value={activeAlertsCount.toString()}
-          sub={`${lowStockCount} low stock · ${outOfStockCount} out of stock`}
-          icon={AlertTriangle}
-          tone="warn"
-        />
-        <StatCard
-          c={c}
-          label="Draft POs"
-          value="0"
-          sub="Awaiting approval"
-          icon={ClipboardList}
-          tone="accent"
-        />
-        <StatCard
-          c={c}
-          label="Sold value (life time)"
+          label="Sold value (This Month)"
           value={`Rs ${totalSoldValue.toLocaleString()}`}
-          sub={`${totalSoldUnits} units across ${distinctSKUs} items`}
+          sub={(() => {
+            const now = new Date();
+            const monthName = now.toLocaleString("en-US", { month: "long" });
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            return `From ${monthName} 1 to ${monthName} ${lastDay}`;
+          })()}
           icon={Wallet}
           tone="accent"
         />

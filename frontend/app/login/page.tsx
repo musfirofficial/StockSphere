@@ -199,20 +199,16 @@ export default function LoginPage() {
             textAlign: "center",
           }}
         >
-          <div
+          <img
+            src="/stocksphere_logo.svg"
+            alt="StockSphere Logo"
             style={{
-              width: 48,
-              height: 48,
+              width: 52,
+              height: 52,
               borderRadius: 14,
-              background: c.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: `0 4px 12px ${c.accent}33`,
+              objectFit: "contain",
             }}
-          >
-            <Boxes size={24} color="#fff" strokeWidth={2.4} />
-          </div>
+          />
           <div>
             <h1
               style={{

@@ -57,7 +57,7 @@ named differently.
 
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from collections import defaultdict
 
@@ -843,9 +843,10 @@ async def seed_database() -> None:
         )
         existing_row = existing_user.one_or_none()
 
-        transaction_user_ids = []  # admin + inventory_manager ids only
+        transaction_user_ids = []  # everyone EXCEPT auditor: admin + IM + sales
         admin_ids = []
         im_ids = []
+        sales_ids = []
         all_users_info = []  # for audit log generation below
         user_rows = []
 
@@ -929,12 +930,14 @@ async def seed_database() -> None:
                     created_at=ts,
                 )
             )
-            if role in (UserRole.ADMIN, UserRole.INVENTORY_MANAGER):
+            if role in (UserRole.ADMIN, UserRole.INVENTORY_MANAGER, UserRole.SALES):
                 transaction_user_ids.append(uid)
             if role == UserRole.ADMIN:
                 admin_ids.append(uid)
             if role == UserRole.INVENTORY_MANAGER:
                 im_ids.append(uid)
+            if role == UserRole.SALES:
+                sales_ids.append(uid)
 
         if user_rows:
             await session.execute(insert(User), user_rows)
@@ -942,7 +945,7 @@ async def seed_database() -> None:
         print(
             f"Users: {len(user_rows)} created this run "
             f"(transaction-eligible users: {len(transaction_user_ids)} "
-            f"= 2 admin + 2 inventory manager)."
+            f"= 2 admin + 2 inventory manager + 5 sales; auditor excluded)."
         )
 
         # ------------------------------------------------------------- #
@@ -1041,8 +1044,8 @@ async def seed_database() -> None:
                 )
                 cost_price = Decimal(str(round(float(cost_price), 2)))
                 selling_price = Decimal(
-                    str(round(float(cost_price) * random.uniform(1.15, 1.6), 2))
-                )
+                    str(round(float(cost_price) * random.uniform(1.15, 1.6)))
+                ).quantize(Decimal("1.00"))
 
                 ts = random_datetime_last_365_days()
                 item_base.append(
@@ -1260,6 +1263,25 @@ async def seed_database() -> None:
 
         achieved_sold_value = MONTHLY_SOLD_VALUE_TARGET - shortfall
 
+        # ------------------------------------------------------------- #
+        # 5d. Guarantee every transaction-eligible user (2 admin + 2 IM +
+        #     5 sales) has AT LEAST ONE transaction - with ~1000+
+        #     transactions across 9 users this is virtually certain
+        #     anyway, but this makes it exact rather than probabilistic.
+        #     Auditor is never in transaction_user_ids, so never assigned.
+        #     Reassigning an existing row's user_id doesn't touch
+        #     quantities/dates, so continuity is unaffected.
+        # ------------------------------------------------------------- #
+        users_with_tx = {t["user_id"] for t in transaction_rows}
+        missing_users = [
+            uid for uid in transaction_user_ids if uid not in users_with_tx
+        ]
+        if missing_users and transaction_rows:
+            pool_indices = list(range(len(transaction_rows)))
+            random.shuffle(pool_indices)
+            for uid, idx in zip(missing_users, pool_indices):
+                transaction_rows[idx]["user_id"] = uid
+
         await session.execute(insert(Item), item_rows)
 
         if alert_rows:
@@ -1471,19 +1493,3 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(seed_database())
-
-"""
-TRUNCATE TABLE 
-    audit_logs,
-    categories,
-    items,
-    purchase_order_items,
-    purchase_orders,
-    reports,
-    stock_alerts,
-    suppliers,
-    transactions,
-    users
-RESTART IDENTITY 
-CASCADE;
-"""

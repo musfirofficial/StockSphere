@@ -17,12 +17,16 @@ import {
   Transaction,
   getItemCurrentQty,
 } from "../DataContext";
+import { isReadOnly } from "@/lib/roles";
 
 type BulkRow = { item: string; type: "Stock in" | "Stock out"; qty: number };
 
 export default function TransactionsPage() {
   const { c } = useTheme();
   const { transactionList, itemList, loggedInUser, recordTransactions, setHeaderActions } = useData();
+
+  // Derive read-only mode from role (Auditor & Sales cannot create transactions)
+  const readOnly = isReadOnly(loggedInUser?.role ?? "", "transactions");
 
   // ── Read view state ──
   const [search, setSearch] = useState("");
@@ -52,6 +56,11 @@ export default function TransactionsPage() {
   }, []);
 
   useEffect(() => {
+    // Read-only roles never see the New transaction button
+    if (readOnly) {
+      setHeaderActions(null);
+      return;
+    }
     if (isAdding) {
       setHeaderActions(null);
       return;
@@ -78,7 +87,7 @@ export default function TransactionsPage() {
       </button>
     );
     return () => setHeaderActions(null);
-  }, [c, isAdding, setHeaderActions]);
+  }, [isAdding, c, setHeaderActions, readOnly]);
 
   // ── Filtered list (no Adjustment) ──
   const filtered = useMemo(

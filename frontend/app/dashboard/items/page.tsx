@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
 import { useData, Item, Category, Supplier } from "../DataContext";
+import { isReadOnly, isSalesRole } from "@/lib/roles";
 
 // ── Checkbox ───────────────────────────────────────────────
 function Cb({
@@ -492,10 +493,15 @@ export default function ItemsPage() {
     categoryList,
     supplierList,
     setHeaderActions,
+    loggedInUser,
     addItem,
     saveItemEdit,
     deleteItem,
   } = useData();
+
+  // Derive read-only and sales flags from role
+  const readOnly = isReadOnly(loggedInUser?.role ?? "", "items");
+  const isSales = isSalesRole(loggedInUser?.role ?? "");
 
   // Selected checkboxes
   const [selected, setSelected] = useState<string[]>([]);
@@ -538,8 +544,12 @@ export default function ItemsPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Set page header actions dynamically
+  // Set page header actions dynamically — hidden for read-only roles
   useEffect(() => {
+    if (readOnly) {
+      setHeaderActions(null);
+      return;
+    }
     setHeaderActions(
       <button
         onClick={() => setAddItemOpen(true)}
@@ -562,7 +572,7 @@ export default function ItemsPage() {
       </button>
     );
     return () => setHeaderActions(null);
-  }, [c, setHeaderActions]);
+  }, [c, setHeaderActions, readOnly]);
 
   // Sync edit form fields when selecting another item
   useEffect(() => {
@@ -876,7 +886,8 @@ export default function ItemsPage() {
                 )}
               </div>
 
-              {/* Supplier Filter Dropdown */}
+              {/* Supplier Filter Dropdown — hidden for Sales (no supplier data) */}
+              {!isSales && (
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => {
@@ -1011,6 +1022,7 @@ export default function ItemsPage() {
                   </>
                 )}
               </div>
+              )}
 
               {/* Text Search Bar */}
               <div
@@ -1081,7 +1093,7 @@ export default function ItemsPage() {
                     "Supplier",
                     "Stock Qty",
                     "Status",
-                    "Actions",
+                    ...(readOnly ? [] : ["Actions"]),
                   ].map((h) => (
                     <th
                       key={h}
@@ -1154,8 +1166,15 @@ export default function ItemsPage() {
                         <td style={{ padding: "11px 20px", color: c.textMuted }}>
                           {item.category}
                         </td>
-                        <td style={{ padding: "11px 20px", color: c.textMuted }}>
-                          {item.supplier}
+                        <td style={{ padding: "11px 20px" }}>
+                          {/* Show 'No Access' for Sales role when supplier is not provided by API */}
+                          {isSales && !item.supplier ? (
+                            <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
+                              No Access
+                            </span>
+                          ) : (
+                            <span style={{ color: c.textMuted }}>{item.supplier}</span>
+                          )}
                         </td>
                         <td
                           style={{
@@ -1172,47 +1191,49 @@ export default function ItemsPage() {
                           style={{ padding: "11px 20px" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button
-                              onClick={() => {
-                                setSelectedItem(item);
-                                setIsEditing(true);
-                              }}
-                              title="Edit item"
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 7,
-                                border: `1px solid ${c.border}`,
-                                background: c.surface,
-                                color: c.textMuted,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              onClick={() => setItemToDelete(item)}
-                              title="Delete item"
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 7,
-                                border: `1px solid ${c.border}`,
-                                background: c.surface,
-                                color: c.danger,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
+                          {!readOnly && (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button
+                                onClick={() => {
+                                  setSelectedItem(item);
+                                  setIsEditing(true);
+                                }}
+                                title="Edit item"
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 7,
+                                  border: `1px solid ${c.border}`,
+                                  background: c.surface,
+                                  color: c.textMuted,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              <button
+                                onClick={() => setItemToDelete(item)}
+                                title="Delete item"
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 7,
+                                  border: `1px solid ${c.border}`,
+                                  background: c.surface,
+                                  color: c.danger,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1429,7 +1450,11 @@ export default function ItemsPage() {
                         </Field>
                         <Field label="Supplier" c={c}>
                           <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {selectedItem.supplier}
+                            {isSales && !selectedItem.supplier ? (
+                              <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
+                                No Access
+                              </span>
+                            ) : selectedItem.supplier}
                           </div>
                         </Field>
                       </div>
@@ -1680,26 +1705,28 @@ export default function ItemsPage() {
               >
                 {!isEditing ? (
                   <>
-                    <button
-                      onClick={() => setIsEditing(true)}
-                      style={{
-                        flex: 1,
-                        padding: "9px",
-                        borderRadius: 8,
-                        border: `1px solid ${c.border}`,
-                        background: c.surface,
-                        color: c.text,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                      }}
-                    >
-                      <Pencil size={13} /> Edit Details
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        style={{
+                          flex: 1,
+                          padding: "9px",
+                          borderRadius: 8,
+                          border: `1px solid ${c.border}`,
+                          background: c.surface,
+                          color: c.text,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Pencil size={13} /> Edit Details
+                      </button>
+                    )}
                     <button
                       onClick={() => setSelectedItem(null)}
                       style={{

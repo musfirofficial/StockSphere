@@ -33,7 +33,14 @@ async def create_new_item(
 async def read_all_item(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER])
+        RoleChecker(
+            [
+                UserRole.ADMIN,
+                UserRole.INVENTORY_MANAGER,
+                UserRole.SALES,
+                UserRole.AUDITOR,
+            ]
+        )
     ),
 ):
     return await crud_item.get_all_items(db)

@@ -173,7 +173,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    // Auth check
+    // Auth check — runs once on mount only
     const logged = sessionStorage.getItem("isLoggedIn");
     if (logged !== "true") {
       router.push("/");
@@ -184,7 +184,10 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
         setLoggedInUser(JSON.parse(userStr));
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  useEffect(() => {
     // Responsive setup
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -192,7 +195,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [router]);
+  }, []);
 
   // Close mobile sidebar on route change
   useEffect(() => {
@@ -339,20 +342,17 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
               justifyContent: collapsed && !isMobile ? "center" : "flex-start",
             }}
           >
-            <div
+            <img
+              src="/stocksphere_logo.svg"
+              alt="StockSphere Logo"
               style={{
-                width: 28,
-                height: 28,
+                width: 30,
+                height: 30,
                 borderRadius: 8,
-                background: c.accent,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                objectFit: "contain",
                 flexShrink: 0,
               }}
-            >
-              <Boxes size={16} color="#fff" strokeWidth={2.4} />
-            </div>
+            />
             {(!collapsed || isMobile) && (
               <span style={{ fontSize: 15, fontWeight: 600 }}>StockSphere</span>
             )}
@@ -371,13 +371,13 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
             {NAV_MAIN
               .filter((item) => getAllowedNavKeys(loggedInUser?.role ?? "Admin").includes(item.key as any))
               .map((item) => (
-              <NavItem
-                key={item.key}
-                item={item}
-                collapsed={collapsed && !isMobile}
-                c={c}
-              />
-            ))}
+                <NavItem
+                  key={item.key}
+                  item={item}
+                  collapsed={collapsed && !isMobile}
+                  c={c}
+                />
+              ))}
           </div>
 
           <div

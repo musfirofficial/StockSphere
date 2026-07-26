@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from app.schemas.user import UserCreate
-from app.models import User, UserRole
+from app.models import User
 from app.services.security import hash_password
 from typing import Sequence
 import uuid
