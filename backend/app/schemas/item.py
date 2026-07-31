@@ -1,16 +1,18 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from typing import Optional, Any
 from datetime import datetime
+from app.models import UserRole
 import uuid
 import re
+
 
 # ------------------------------ Item Base schema ----------------------------- #
 class ItemBase(BaseModel):
     item_name: str = Field(min_length=3, max_length=100)
     sku: str = Field(min_length=5, max_length=20)
     description: Optional[str] = None
-    category_id: uuid.UUID
-    supplier_id: uuid.UUID
+    category_id: Optional[uuid.UUID] = None
+    supplier_id: Optional[uuid.UUID] = None
 
     quantity_in_stock: int = Field(ge=0)
     reorder_quantity: int = Field(ge=0)
@@ -22,16 +24,18 @@ class ItemBase(BaseModel):
 
     reorder_level: int = Field(ge=0)
 
-    @field_validator('sku')
+    @field_validator("sku")
     @classmethod
     def sku_input(cls, v: str):
         if not re.match(r"^[A-Z0-9-]+-\d+$", v):
             raise ValueError("SKU must be in the format ABCD-1234")
         return v
 
+
 # ----------------------------- Item create schema ---------------------------- #
 class ItemCreate(ItemBase):
     pass
+
 
 # ---------------------------- Item update schema ---------------------------- #
 class ItemUpdate(BaseModel):
@@ -54,12 +58,13 @@ class ItemUpdate(BaseModel):
 
     is_active: Optional[bool] = None
 
-    @field_validator('sku')
+    @field_validator("sku")
     @classmethod
     def sku_input(cls, v):
         if v is not None and not re.match(r"^[A-Z0-9-]+-\d+$", v):
             raise ValueError("SKU must be in the format ABCD-1234")
         return v
+
 
 # --------------------------- Item response schema --------------------------- #
 class ItemResponse(ItemBase):
@@ -68,4 +73,25 @@ class ItemResponse(ItemBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    category_name: Optional[str] = None
+    supplier_name: Optional[str] = None
+
+    cost_price: float | None = Field(default=None, gt=0)
+
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    def extract_names(cls, data: Any):
+        if hasattr(data, "category") and data.category:
+            setattr(data, "category_name", data.category.category_name)
+        if hasattr(data, "supplier") and data.supplier:
+            setattr(data, "supplier_name", data.supplier.supplier_name)
+        return data
+
+    @model_validator(mode="after")
+    def sanitize_for_sales(self, info):
+        if info.context and info.context.get("role") == UserRole.SALES:
+            self.supplier_name = None
+            self.cost_price = None
+        return self

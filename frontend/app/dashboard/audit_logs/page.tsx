@@ -392,23 +392,8 @@ export default function AuditLogsPage() {
                     mode === "light" ? "0 1px 3px rgba(0,0,0,0.03)" : "none",
                 }}
               >
-                {/* Category Icon Badge */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 40,
-                    height: 40,
-                    borderRadius: 10,
-                    background:
-                      mode === "light" ? cat.badgeBgLight : cat.badgeBgDark,
-                    border: `1px solid ${cat.accentColor}33`,
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon size={20} color={cat.accentColor} />
-                </div>
+                {/* Category Icon */}
+                <Icon size={18} color={cat.accentColor} style={{ flexShrink: 0, marginTop: 2 }} />
 
                 {/* Content */}
                 <div
@@ -430,16 +415,9 @@ export default function AuditLogsPage() {
                   >
                     <span
                       style={{
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        color: cat.accentColor,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.5px",
-                        background:
-                          mode === "light" ? cat.badgeBgLight : cat.badgeBgDark,
-                        padding: "2px 8px",
-                        borderRadius: 6,
-                        border: `1px solid ${cat.accentColor}22`,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: c.text,
                       }}
                     >
                       {cat.label}

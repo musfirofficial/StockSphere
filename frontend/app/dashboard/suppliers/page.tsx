@@ -16,134 +16,8 @@ import { useTheme } from "../ThemeContext";
 import { useData, Supplier } from "../DataContext";
 import { apiFetch } from "@/lib/api";
 import { isReadOnly } from "@/lib/roles";
+import { Checkbox as Cb, StatusBadge, Modal, SearchBar, Pagination, ConfirmDeleteModal } from "@/components/ui";
 
-// ── Checkbox ───────────────────────────────────────────────
-function Cb({
-  checked,
-  onChange,
-  c,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  c: any;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      style={{
-        width: 17,
-        height: 17,
-        borderRadius: 5,
-        flexShrink: 0,
-        border: `1.5px solid ${checked ? c.accent : c.border}`,
-        background: checked ? c.accent : "transparent",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        padding: 0,
-      }}
-    >
-      {checked && <Check size={11} strokeWidth={3} color="#fff" />}
-    </button>
-  );
-}
-
-// ── Status Badge ───────────────────────────────────────────
-function StatusBadge({ active, c }: { active: boolean; c: any }) {
-  return (
-    <span
-      style={{
-        fontSize: 11.5,
-        fontWeight: 600,
-        padding: "3px 9px",
-        borderRadius: 999,
-        background: active ? c.accentSoft : c.surfaceMuted,
-        color: active ? c.accent : c.textFaint,
-      }}
-    >
-      {active ? "Active" : "Inactive"}
-    </span>
-  );
-}
-
-// ── Modal ──────────────────────────────────────────────────
-interface ModalProps {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  c: any;
-  width?: number;
-}
-function Modal({ title, onClose, children, c, width = 440 }: ModalProps) {
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(10,10,8,0.5)",
-        zIndex: 999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width,
-          maxWidth: "100%",
-          background: c.surface,
-          border: `1px solid ${c.border}`,
-          borderRadius: 14,
-          padding: 22,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 18,
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: 15, fontWeight: 600 }}>{title}</span>
-          <button
-            onClick={onClose}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              border: "none",
-              background: c.surfaceMuted,
-              color: c.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-        <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 interface FieldProps {
   label: string;
@@ -366,77 +240,12 @@ function CreateSupplierModal({ onClose, onSave, c }: CreateSupplierModalProps) {
   );
 }
 
-// ── Delete Supplier Confirmation Modal ──────────────────────
-interface DeleteSupplierModalProps {
-  supplier: Supplier;
-  onClose: () => void;
-  onConfirm: () => void;
-  c: any;
-}
-function DeleteSupplierModal({
-  supplier,
-  onClose,
-  onConfirm,
-  c,
-}: DeleteSupplierModalProps) {
-  return (
-    <Modal title="Delete supplier" onClose={onClose} c={c} width={380}>
-      <p
-        style={{
-          fontSize: 13.5,
-          color: c.textMuted,
-          lineHeight: 1.6,
-          marginBottom: 20,
-        }}
-      >
-        Delete{" "}
-        <span style={{ color: c.text, fontWeight: 600 }}>
-          {supplier.supplierName}
-        </span>
-        ? This will remove the supplier details. This action cannot be undone.
-      </p>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: `1px solid ${c.border}`,
-            background: c.surface,
-            color: c.text,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: c.danger,
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Delete supplier
-        </button>
-      </div>
-    </Modal>
-  );
-}
+
 
 // ── Main Page Component ─────────────────────────────────────
 export default function SuppliersPage() {
   const { mode, c } = useTheme();
-  const { supplierList, setSupplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier, loggedInUser } = useData();
+  const { supplierList, setSupplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier, loggedInUser, fetchSuppliers, refreshSuppliers } = useData();
 
   // Derive read-only mode from role
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "suppliers");
@@ -560,21 +369,7 @@ export default function SuppliersPage() {
   // Load suppliers from backend
   const loadSuppliersFromBackend = async () => {
     try {
-      const data = await apiFetch<any[]>("/suppliers/");
-      const mapped: Supplier[] = data.map((s: any) => ({
-        id: s.supplier_id,
-        supplierName: s.supplier_name,
-        contactPerson: s.contact_person,
-        phone: s.phone,
-        email: s.email,
-        address: s.address,
-        active: s.is_active ?? true,
-        createdAt: s.created_at,
-        updatedAt: s.updated_at,
-        notes: s.notes || "",
-        totalSupplies: s.total_supplies || 0,
-      }));
-      setSupplierList(mapped);
+      await fetchSuppliers();
     } catch (err: any) {
       console.error("Failed to load suppliers from backend:", err);
     }
@@ -599,7 +394,7 @@ export default function SuppliersPage() {
       });
 
       setAddSupplierOpen(false);
-      loadSuppliersFromBackend();
+      await refreshSuppliers();
     } catch (err: any) {
       alert(err.message || "Failed to create supplier");
     }
@@ -624,7 +419,7 @@ export default function SuppliersPage() {
       });
 
       setIsEditingSupplier(false);
-      loadSuppliersFromBackend();
+      await refreshSuppliers();
     } catch (err: any) {
       setSupplierEditError(err.message || "Failed to update supplier");
     }
@@ -639,7 +434,7 @@ export default function SuppliersPage() {
         setSelectedSupplier(null);
       }
       setSupplierToDelete(null);
-      loadSuppliersFromBackend();
+      await refreshSuppliers();
     } catch (err: any) {
       alert(err.message || "Failed to delete supplier");
     }
@@ -724,39 +519,16 @@ export default function SuppliersPage() {
                 </button>
               )}
               {/* Search bar */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: `1px solid ${c.border}`,
-                  background: c.inputBg,
-                  maxWidth: 260,
-                  width: "100%",
-                  marginLeft: "auto",
+              <SearchBar
+                value={supplierSearch}
+                onChange={(val) => {
+                  setSupplierSearch(val);
+                  setPage(1);
                 }}
-              >
-                <Search size={14} color={c.textFaint} />
-                <input
-                  value={supplierSearch}
-                  onChange={(e) => {
-                    setSupplierSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search suppliers..."
-                  style={{
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    color: c.text,
-                    fontSize: 13,
-                    width: "100%",
-                    fontFamily: "inherit",
-                  }}
-                />
-              </div>
+                placeholder="Search suppliers..."
+                c={c}
+                maxWidth={260}
+              />
             </div>
           </div>
 
@@ -924,82 +696,15 @@ export default function SuppliersPage() {
           </div>
 
           {/* pagination */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "13px 20px",
-              borderTop: `1px solid ${c.border}`,
-              flexShrink: 0,
-            }}
-          >
-            <span style={{ fontSize: 12, color: c.textFaint }}>
-              Showing {totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-              {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} suppliers
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: page === 1 ? "default" : "pointer",
-                  opacity: page === 1 ? 0.4 : 1,
-                }}
-              >
-                <ChevronLeft size={14} />
-              </button>
-              {pageNums.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPage(n)}
-                  style={{
-                    minWidth: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    padding: "0 6px",
-                    border: `1px solid ${n === page ? c.accent : c.border}`,
-                    background: n === page ? c.accentSoft : c.surface,
-                    color: n === page ? c.accent : c.textMuted,
-                    fontSize: 12.5,
-                    fontWeight: n === page ? 600 : 500,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: page === totalPages ? "default" : "pointer",
-                  opacity: page === totalPages ? 0.4 : 1,
-                }}
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalCount={totalCount}
+            pageSize={PAGE_SIZE}
+            itemLabel="suppliers"
+            onPageChange={setPage}
+            c={c}
+          />
         </div>
 
         {/* ── Supplier Detail Slide Panel ── */}
@@ -1377,8 +1082,11 @@ export default function SuppliersPage() {
       )}
 
       {supplierToDelete && (
-        <DeleteSupplierModal
-          supplier={supplierToDelete}
+        <ConfirmDeleteModal
+          title="Delete supplier"
+          itemName={supplierToDelete.supplierName}
+          itemType="supplier"
+          message={`Delete ${supplierToDelete.supplierName}? This will remove the supplier details. This action cannot be undone.`}
           onClose={() => setSupplierToDelete(null)}
           onConfirm={handleDeleteConfirm}
           c={c}

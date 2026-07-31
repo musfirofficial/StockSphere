@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, extract, cast, Date, desc
+from sqlalchemy.orm import selectinload
 from app.schemas.dashboard import MostSoldItem
 from app.schemas.transaction import TransactionResponse
 from datetime import datetime, timedelta
@@ -17,7 +18,6 @@ from typing import Sequence, Optional
 import uuid
 
 local_tz = datetime.now().astimezone().tzinfo
-now = datetime.now(local_tz)
 
 
 # -------------------------- Get Item in stock data -------------------------- #
@@ -73,6 +73,7 @@ async def get_draft_po_count(db: AsyncSession) -> int:
 async def get_current_month_sold_value(
     db: AsyncSession, user_id: Optional[uuid.UUID] = None
 ) -> Decimal:
+    now = datetime.now(local_tz)
     query = (
         select(
             func.coalesce(
@@ -99,8 +100,8 @@ async def get_current_month_sold_value(
 async def get_last_7_days_sales(
     db: AsyncSession, user_id: Optional[uuid.UUID] = None
 ) -> Sequence[Decimal]:
-    # Get current local date
-    today = now.date()
+    # Get current local date (computed dynamically at call time)
+    today = datetime.now(local_tz).date()
     start_date = today - timedelta(days=6)
 
     # Cast timestamp to Date for daily grouping
@@ -173,8 +174,13 @@ async def get_most_sold_items(
 async def get_last_5_transactions(
     db: AsyncSession, user_id: Optional[uuid.UUID] = None
 ) -> Sequence[TransactionResponse]:
-
-    query = select(Transaction).order_by(Transaction.transaction_date.desc())
+    # Eagerly load .item and .user so Pydantic's model_validator doesn't
+    # trigger synchronous lazy-loads inside an async session (MissingGreenlet).
+    query = (
+        select(Transaction)
+        .options(selectinload(Transaction.item), selectinload(Transaction.user))
+        .order_by(Transaction.transaction_date.desc())
+    )
 
     if user_id is not None:
         query = query.where(Transaction.user_id == user_id)

@@ -5,6 +5,7 @@ import {
   Plus, Search, ChevronLeft, ChevronRight, X, Check, ArrowLeft, Save, Sparkles, FileText, Trash2
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import { ConfirmDeleteModal, Pagination } from "@/components/ui";
 
 // ── Types ──────────────────────────────────────────────────
 interface Supplier {
@@ -74,6 +75,7 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
 
   // Selection / Flow States
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
+  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
   const [isEditingPO, setIsEditingPO] = useState(false);
   const [supplierSelectOpen, setSupplierSelectOpen] = useState(false);
   const [smartScanLoading, setSmartScanLoading] = useState(false);
@@ -1115,7 +1117,7 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeletePO(po.id);
+                            setPoToDelete(po);
                           }}
                           style={{
                             border: "none",
@@ -1366,6 +1368,23 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
             </div>
           </div>
         </div>
+      )}
+
+      {/* Delete PO Confirmation Modal */}
+      {poToDelete && (
+        <ConfirmDeleteModal
+          title="Delete Purchase Order"
+          itemName={poToDelete.id}
+          itemType="purchase order"
+          message={`Are you sure you want to delete purchase order ${poToDelete.id} for ${poToDelete.supplierName}? This action cannot be undone.`}
+          onClose={() => setPoToDelete(null)}
+          onConfirm={async () => {
+            const targetId = poToDelete.id;
+            setPoToDelete(null);
+            await handleDeletePO(targetId);
+          }}
+          c={c}
+        />
       )}
     </div>
   );

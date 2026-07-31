@@ -43,7 +43,13 @@ async def read_all_item(
         )
     ),
 ):
-    return await crud_item.get_all_items(db)
+    items = await crud_item.get_all_items(db)
+
+    # Pass role context during validation to trigger sanitization
+    return [
+        ItemResponse.model_validate(item, context={"role": current_user.role})
+        for item in items
+    ]
 
 
 # ---------------------------------------------------- Update Item endpoint -----------------------------------------------------------
@@ -100,8 +106,7 @@ async def update_existing_item(
             updated_item.selling_price,
         )
 
-    await db.refresh(updated_item)
-    return updated_item
+    return await crud_item.get_item_by_item_id(db, updated_item.item_id)
 
 
 # ---------------------------------------------------- Delete item endpoint -----------------------------------------------------------

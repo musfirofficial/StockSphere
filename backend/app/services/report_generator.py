@@ -129,7 +129,7 @@ def generate_po_pdf_document(output_target: io.BytesIO, po_items: list):
         # Kept row padding and margins tight to minimize spacing before details
         [
             Paragraph(
-                "[Street Address]<br/>[Email]<br/>Phone: (000) 000-0000",
+                "Batticaloa, Sri Lanka<br/>Phone: 077 777 7777",
                 style_company_details,
             ),
             "",

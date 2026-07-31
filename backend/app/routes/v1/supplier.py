@@ -32,7 +32,7 @@ async def create_new_supplier(
 async def read_all_suppliers(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER])
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER, UserRole.AUDITOR])
     ),
 ):
     return await supplier_crud.get_all_suppliers(db)

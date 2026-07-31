@@ -18,6 +18,7 @@ from app.routes.v1.transaction import router as transaction_router
 from app.routes.v1.purchaseorder import router as purchaseorder_router
 from app.routes.v1.auditlog import router as auditlog_router
 from app.routes.v1.dashboard import router as dashboard_router
+from app.routes.v1.stockalert import router as stockalert_router
 
 
 # Function for when server starts, it creates the database
@@ -82,3 +83,4 @@ app.include_router(transaction_router)
 app.include_router(purchaseorder_router)
 app.include_router(auditlog_router)
 app.include_router(dashboard_router)
+app.include_router(stockalert_router)

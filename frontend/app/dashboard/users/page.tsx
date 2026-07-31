@@ -17,6 +17,7 @@ import {
 import { useTheme } from "../ThemeContext";
 import { useData, User } from "../DataContext";
 import { apiFetch } from "@/lib/api";
+import { ConfirmDeleteModal } from "@/components/ui";
 
 // ── Checkbox ───────────────────────────────────────────────
 function Cb({
@@ -407,65 +408,7 @@ function CreateModal({ onClose, onSave, c }: CreateModalProps) {
   );
 }
 
-// ── Delete Confirmation Modal ──────────────────────────────
-interface DeleteModalProps {
-  user: User;
-  onClose: () => void;
-  onConfirm: () => void;
-  c: any;
-}
-function DeleteModal({ user, onClose, onConfirm, c }: DeleteModalProps) {
-  return (
-    <Modal title="Delete user" onClose={onClose} c={c} width={380}>
-      <p
-        style={{
-          fontSize: 13.5,
-          color: c.textMuted,
-          lineHeight: 1.6,
-          marginBottom: 20,
-        }}
-      >
-        Delete{" "}
-        <span style={{ color: c.text, fontWeight: 600 }}>{user.fullName}</span>?
-        This removes their access immediately and cannot be undone.
-      </p>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: `1px solid ${c.border}`,
-            background: c.surface,
-            color: c.text,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: c.danger,
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Delete user
-        </button>
-      </div>
-    </Modal>
-  );
-}
+
 
 // ── Main Page Component ─────────────────────────────────────
 export default function UsersPage() {
@@ -1582,8 +1525,11 @@ export default function UsersPage() {
       )}
 
       {userToDelete && (
-        <DeleteModal
-          user={userToDelete}
+        <ConfirmDeleteModal
+          title="Delete user"
+          itemName={userToDelete.fullName}
+          itemType="user"
+          message={`Delete ${userToDelete.fullName}? This removes their access immediately and cannot be undone.`}
           onClose={() => setUserToDelete(null)}
           onConfirm={handleDeleteConfirm}
           c={c}

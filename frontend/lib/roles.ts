@@ -75,7 +75,7 @@ export function getAllowedNavKeys(role: AppRole): NavKey[] {
 /** Pages that are read-only (no create/edit/delete) for a given role. */
 const READ_ONLY_PAGES: Record<string, NavKey[]> = {
   Auditor: ["categories", "suppliers", "items", "transactions"],
-  Sales: ["categories", "items", "transactions"],
+  Sales: ["categories", "items"],
 };
 
 /** Returns true if the given page should be read-only for the given role. */

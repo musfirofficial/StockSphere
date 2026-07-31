@@ -1,358 +1,357 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { AlertTriangle, Bell, Check, Phone, Mail, FileText, ArrowRight } from "lucide-react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { AlertCircle, AlertTriangle, Bell, Clock, Search, RefreshCw, CheckCircle2 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
-import { useData } from "../DataContext";
-import Link from "next/link";
+import { apiFetch } from "@/lib/api";
+
+export interface StockAlertItem {
+  alert_id: string;
+  item_id: string;
+  item_name: string;
+  status: "CRITICAL" | "LOW_STOCK" | "RESOLVED";
+  supplier_id: string;
+  supplier_name: string;
+  created_at: string;
+  resolved_at?: string | null;
+}
 
 export default function StockAlertsPage() {
-  const { c } = useTheme();
-  const { itemList, supplierList } = useData();
+  const { c, mode } = useTheme();
+  const [alerts, setAlerts] = useState<StockAlertItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Find items where quantity is <= reorderLevel
-  const lowStockItems = useMemo(() => {
-    return itemList.filter(
-      (item) => item.active && item.quantity <= item.reorderLevel
-    );
-  }, [itemList]);
+  const [activeTab, setActiveTab] = useState<"active" | "resolved">("active");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "CRITICAL" | "LOW_STOCK">("all");
 
-  // Helper to find supplier details for contact info
-  const getSupplierContact = (supplierName: string) => {
-    const supp = supplierList.find(
-      (s) =>
-        s.supplierName.toLowerCase() === supplierName.toLowerCase() ||
-        s.id.toLowerCase() === supplierName.toLowerCase()
-    );
-    return supp
-      ? { name: supp.supplierName, phone: supp.phone, email: supp.email }
-      : { name: supplierName, phone: "N/A", email: "N/A" };
+  const fetchAlerts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiFetch<StockAlertItem[]>("/stock-alerts/");
+      if (Array.isArray(data)) {
+        setAlerts(data);
+      } else {
+        setAlerts([]);
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch stock alerts:", err);
+      setError(err?.message || "Failed to load stock alerts. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAlerts();
+  }, [fetchAlerts]);
+
+  // Filter items based on tab, search query, and dropdown filter
+  const filteredAlerts = useMemo(() => {
+    let items = alerts.filter((alert) => {
+      if (activeTab === "active") {
+        return alert.status !== "RESOLVED";
+      } else {
+        return alert.status === "RESOLVED";
+      }
+    });
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      items = items.filter(
+        (alert) =>
+          (alert.item_name || "").toLowerCase().includes(q) ||
+          (alert.supplier_name || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (activeTab === "active" && activeFilter !== "all") {
+      items = items.filter((alert) => alert.status === activeFilter);
+    }
+
+    if (activeTab === "resolved") {
+      items.sort((a, b) => {
+        const timeA = a.resolved_at ? new Date(a.resolved_at).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+        const timeB = b.resolved_at ? new Date(b.resolved_at).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+        return timeB - timeA;
+      });
+    } else {
+      items.sort((a, b) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return timeB - timeA;
+      });
+    }
+
+    return items;
+  }, [alerts, activeTab, searchQuery, activeFilter]);
+
+  const formatDate = (dateStr?: string | null) => {
+    if (!dateStr) return "N/A";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return (
+        d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" }) +
+        " • " +
+        d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+      );
+    } catch {
+      return dateStr;
+    }
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, width: "100%" }}>
-      {/* Summary Header Card */}
-      <div
-        style={{
-          background: lowStockItems.length > 0 ? c.warnSoft : c.accentSoft,
-          border: `1px solid ${lowStockItems.length > 0 ? c.warn : c.accent}`,
-          borderRadius: 14,
-          padding: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
-        <div
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%" }}>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 24, borderBottom: `1px solid ${c.border}` }}>
+        <button
+          onClick={() => setActiveTab("active")}
           style={{
-            width: 44,
-            height: 44,
-            borderRadius: 10,
-            background: lowStockItems.length > 0 ? c.warn : c.accent,
-            color: "#fff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
+            background: "none",
+            border: "none",
+            padding: "0 4px 12px",
+            fontSize: 14,
+            fontWeight: 600,
+            color: activeTab === "active" ? c.text : c.textMuted,
+            borderBottom: activeTab === "active" ? `2px solid ${c.accent}` : "2px solid transparent",
+            cursor: "pointer",
+            fontFamily: "inherit",
           }}
         >
-          {lowStockItems.length > 0 ? (
-            <AlertTriangle size={22} />
-          ) : (
-            <Check size={22} strokeWidth={3} />
-          )}
-        </div>
-        <div>
-          <h3
-            style={{
-              fontSize: 15,
-              fontWeight: 700,
-              color: lowStockItems.length > 0 ? c.warn : c.accent,
-              marginBottom: 4,
-            }}
-          >
-            {lowStockItems.length > 0
-              ? `${lowStockItems.length} Stock Alert${lowStockItems.length > 1 ? "s" : ""} Active`
-              : "Inventory Healthy"}
-          </h3>
-          <p
-            style={{
-              fontSize: 13,
-              color: c.textMuted,
-              lineHeight: 1.4,
-            }}
-          >
-            {lowStockItems.length > 0
-              ? "The items listed below have dropped below their defined safety reorder thresholds. Please initiate purchase orders soon to restock."
-              : "All active inventory items are currently stocked above their minimum safety reorder levels."}
-          </p>
-        </div>
+          Active Alerts
+        </button>
+        <button
+          onClick={() => setActiveTab("resolved")}
+          style={{
+            background: "none",
+            border: "none",
+            padding: "0 4px 12px",
+            fontSize: 14,
+            fontWeight: 600,
+            color: activeTab === "resolved" ? c.text : c.textMuted,
+            borderBottom: activeTab === "resolved" ? `2px solid ${c.accent}` : "2px solid transparent",
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          Resolved Alerts
+        </button>
       </div>
 
-      {/* Main Content Area */}
-      {lowStockItems.length === 0 ? (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            height: 300,
-            gap: 12,
-            background: c.surface,
-            border: `1px solid ${c.border}`,
-            borderRadius: 14,
-            padding: 40,
-            textAlign: "center",
-          }}
-        >
-          <div
+      {/* Filter & Search */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", width: 280, flexShrink: 0 }}>
+          <Search size={14} color={c.textFaint} style={{ position: "absolute", left: 10, top: 11 }} />
+          <input
+            type="text"
+            placeholder="Search by item or supplier..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             style={{
-              width: 56,
-              height: 56,
-              borderRadius: "50%",
-              background: c.accentSoft,
-              color: c.accent,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: `0 0 20px ${c.accentSoft}`,
+              width: "100%",
+              padding: "8px 10px 8px 32px",
+              fontSize: 13,
+              background: c.inputBg,
+              color: c.text,
+              border: `1px solid ${c.border}`,
+              borderRadius: 8,
+              outline: "none",
+              fontFamily: "inherit",
+            }}
+          />
+        </div>
+
+        {activeTab === "active" && (
+          <select
+            value={activeFilter}
+            onChange={(e) => setActiveFilter(e.target.value as any)}
+            style={{
+              padding: "8px 14px",
+              fontSize: 13,
+              fontWeight: 500,
+              background: c.inputBg,
+              color: c.text,
+              border: `1px solid ${c.border}`,
+              borderRadius: 8,
+              outline: "none",
+              cursor: "pointer",
+              fontFamily: "inherit",
             }}
           >
-            <Bell size={24} />
+            <option value="all">All Values</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="LOW_STOCK">Low Stock</option>
+          </select>
+        )}
+      </div>
+
+      {/* Main List */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {error && (
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: 10,
+              background: c.dangerSoft,
+              border: `1px solid ${c.danger}`,
+              color: c.danger,
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <AlertCircle size={16} />
+            <span>{error}</span>
           </div>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>All Systems Normal</span>
-          <span style={{ fontSize: 13, color: c.textFaint, maxWidth: 300 }}>
-            No stock levels are critical. Check back later or adjust reorder thresholds in the Items panel.
-          </span>
-        </div>
-      ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-            gap: 16,
-          }}
-        >
-          {lowStockItems.map((item) => {
-            const contact = getSupplierContact(item.supplier);
-            const percentage = Math.min(100, Math.round((item.quantity / item.reorderLevel) * 100)) || 0;
+        )}
+
+        {loading ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 40,
+              background: c.surface,
+              border: `1px solid ${c.border}`,
+              borderRadius: 14,
+              color: c.textMuted,
+              gap: 12,
+            }}
+          >
+            <RefreshCw
+              size={24}
+              style={{ animation: "spin 1s linear infinite" }}
+              color={c.accent}
+            />
+            <span style={{ fontSize: 14 }}>Loading stock alerts...</span>
+          </div>
+        ) : filteredAlerts.length === 0 ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 48,
+              background: c.surface,
+              border: `1px solid ${c.border}`,
+              borderRadius: 14,
+              color: c.textMuted,
+              gap: 10,
+              textAlign: "center",
+            }}
+          >
+            <Bell size={32} color={c.textFaint} />
+            <span style={{ fontSize: 15, fontWeight: 600, color: c.text }}>
+              No {activeTab} alerts found
+            </span>
+            <span style={{ fontSize: 13, color: c.textFaint }}>
+              {activeTab === "active"
+                ? "Inventory is healthy."
+                : "No alerts have been resolved yet."}
+            </span>
+          </div>
+        ) : (
+          filteredAlerts.map((alert) => {
+            const isCritical = alert.status === "CRITICAL";
+            const isResolved = alert.status === "RESOLVED";
+
             return (
               <div
-                key={item.id}
+                key={alert.alert_id}
                 style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 14,
+                  padding: "16px 18px",
                   background: c.surface,
                   border: `1px solid ${c.border}`,
-                  borderRadius: 14,
-                  padding: 18,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  gap: 16,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.01)",
-                  transition: "transform 0.15s, border-color 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = c.warn;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = c.border;
+                  borderRadius: 12,
+                  boxShadow: mode === "light" ? "0 1px 3px rgba(0,0,0,0.03)" : "none",
                 }}
               >
-                <div>
-                  {/* Item Header */}
+                {/* Icon */}
+                {isResolved ? (
+                  <CheckCircle2
+                    size={18}
+                    color={c.accent}
+                    style={{ flexShrink: 0, marginTop: 2 }}
+                  />
+                ) : isCritical ? (
+                  <AlertTriangle
+                    size={18}
+                    color={c.danger || "#ef4444"}
+                    style={{ flexShrink: 0, marginTop: 2 }}
+                  />
+                ) : (
+                  <AlertCircle
+                    size={18}
+                    color="#f97316"
+                    style={{ flexShrink: 0, marginTop: 2 }}
+                  />
+                )}
+
+                {/* Content */}
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
                   <div
                     style={{
                       display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      marginBottom: 10,
-                    }}
-                  >
-                    <div>
-                      <h4
-                        style={{
-                          fontSize: 14.5,
-                          fontWeight: 600,
-                          color: c.text,
-                          marginBottom: 3,
-                        }}
-                      >
-                        {item.itemName}
-                      </h4>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 6,
-                          alignItems: "center",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 11.5,
-                            color: c.textFaint,
-                            fontFamily: "monospace",
-                          }}
-                        >
-                          {item.sku}
-                        </span>
-                        <span style={{ fontSize: 11.5, color: c.textFaint }}>•</span>
-                        <span
-                          style={{
-                            fontSize: 11.5,
-                            color: c.textMuted,
-                            fontWeight: 500,
-                          }}
-                        >
-                          {item.category}
-                        </span>
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        padding: "2px 6px",
-                        borderRadius: 6,
-                        background: c.dangerSoft,
-                        color: c.danger,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {item.quantity === 0 ? "Out of Stock" : "Low Stock"}
-                    </span>
-                  </div>
-
-                  {/* Stock Progress Indicators */}
-                  <div style={{ marginTop: 14 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 12,
-                        marginBottom: 6,
-                      }}
-                    >
-                      <span style={{ color: c.textMuted }}>Current Stock:</span>
-                      <strong style={{ color: c.danger }}>
-                        {item.quantity} / {item.reorderLevel} {item.unit}
-                      </strong>
-                    </div>
-                    <div
-                      style={{
-                        width: "100%",
-                        height: 7,
-                        borderRadius: 99,
-                        background: c.border,
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${percentage}%`,
-                          height: "100%",
-                          borderRadius: 99,
-                          background: item.quantity === 0 ? c.danger : c.warn,
-                          transition: "width 0.4s ease-out",
-                        }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        fontSize: 11,
-                        color: c.textFaint,
-                        marginTop: 4,
-                      }}
-                    >
-                      <span>{percentage}% of Safety Level</span>
-                      <span>Restock qty: {item.reorderQuantity}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Supplier contact & action */}
-                <div
-                  style={{
-                    borderTop: `1px solid ${c.border}`,
-                    paddingTop: 14,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ fontSize: 11.5, color: c.textMuted }}>
-                    Supplier: <strong style={{ color: c.text }}>{contact.name}</strong>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 12, fontSize: 12, color: c.textFaint }}>
-                    <a
-                      href={`tel:${contact.phone}`}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        color: "inherit",
-                        textDecoration: "none",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = c.accent)}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "inherit")}
-                    >
-                      <Phone size={12} /> {contact.phone}
-                    </a>
-                    <a
-                      href={`mailto:${contact.email}`}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 4,
-                        color: "inherit",
-                        textDecoration: "none",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = c.accent)}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "inherit")}
-                    >
-                      <Mail size={12} /> {contact.email}
-                    </a>
-                  </div>
-
-                  <Link
-                    href="/dashboard/purchase_orders"
-                    style={{
-                      marginTop: 6,
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      background: c.surfaceMuted,
-                      color: c.accent,
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      textDecoration: "none",
-                      display: "flex",
                       alignItems: "center",
-                      justifyContent: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
                       gap: 6,
-                      border: `1px solid ${c.border}`,
-                      transition: "background 0.15s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = c.accentSoft;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = c.surfaceMuted;
                     }}
                   >
-                    <FileText size={13} />
-                    <span>Create Purchase Order</span>
-                    <ArrowRight size={13} />
-                  </Link>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: c.text }}>
+                        {alert.item_name || "Unknown Item"}
+                      </span>
+                      <span style={{ fontSize: 13, color: c.textMuted }}>•</span>
+                      <span style={{ fontSize: 13, color: c.textFaint }}>
+                        {alert.supplier_name || "No Supplier"}
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 5,
+                        color: c.textFaint,
+                        fontSize: 12,
+                      }}
+                    >
+                      <Clock size={12} />
+                      <span>
+                        {isResolved
+                          ? formatDate(alert.resolved_at || alert.created_at)
+                          : formatDate(alert.created_at)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </div>
+
+      <style jsx global>{`
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
     </div>
   );
 }

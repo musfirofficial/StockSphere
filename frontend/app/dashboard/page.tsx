@@ -132,7 +132,7 @@ function parseTxDate(dateStr: string): Date {
 
 export default function DashboardOverview() {
   const { c } = useTheme();
-  const { transactionList, userList, supplierList, itemList, loggedInUser } = useData();
+  const { loggedInUser, dashboardData, dashboardLoading, fetchDashboard } = useData();
   const [mounted, setMounted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -146,75 +146,67 @@ export default function DashboardOverview() {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     handleResize();
     window.addEventListener("resize", handleResize);
+    // Fetch dashboard data (instant cache load + background API revalidation)
+    fetchDashboard(true);
     return () => window.removeEventListener("resize", handleResize);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const recentTxs = transactionList.slice(0, 5);
+  // ── Map API response to display values ──────────────────
+  const totalStockQty = dashboardData?.items_in_stock ?? 0;
+  const totalStockValue = dashboardData?.value_of_item_in_stock ?? "0.00";
 
-  // Dynamic calculations for StatCards
-  const totalStockQty = itemList.reduce((acc, item) => acc + item.quantity, 0);
-  const totalStockValue = itemList.reduce((acc, item) => acc + item.quantity * item.costPrice, 0);
+  const activeAlertsCount = dashboardData?.active_alerts ?? 0;
+  const lowStockCount = dashboardData?.active_low_stock_alerts ?? 0;
+  const outOfStockCount = dashboardData?.active_out_of_stock_alerts ?? 0;
 
-  const activeAlertsCount = itemList.filter(item => item.active && item.quantity <= item.reorderLevel).length;
-  const outOfStockCount = itemList.filter(item => item.active && item.quantity === 0).length;
-  const lowStockCount = activeAlertsCount - outOfStockCount;
+  const draftPoCount = dashboardData?.draft_po_count ?? 0;
+  const soldValue = dashboardData?.sold_value ?? "0.00";
 
-  const stockOuts = transactionList.filter(t => t.type === "Stock out" || t.qty < 0);
-  const totalSoldUnits = stockOuts.reduce((acc, t) => acc + Math.abs(t.qty), 0);
-  const distinctSKUs = new Set(stockOuts.map(t => t.item)).size;
-  const totalSoldValue = stockOuts.reduce((acc, t) => {
-    const item = itemList.find(i => i.itemName === t.item);
-    const price = item ? item.sellingPrice : 0;
-    return acc + Math.abs(t.qty) * price;
-  }, 0);
-
-  // Dynamically calculate top items from transactionList (Stock out)
-  const topItems = React.useMemo(() => {
-    const counts: Record<string, number> = {};
-    transactionList.forEach((t) => {
-      if (t.type === "Stock out" || t.qty < 0) {
-        const qty = Math.abs(t.qty);
-        counts[t.item] = (counts[t.item] || 0) + qty;
-      }
-    });
-    return Object.entries(counts)
-      .map(([name, units]) => ({ name, units }))
-      .sort((a, b) => b.units - a.units)
-      .slice(0, 5);
-  }, [transactionList]);
-
-  // Dynamically calculate sales trend for last 7 days
+  // Sales trend: API returns 7 formatted strings (oldest→newest), label with day names
   const salesTrend = React.useMemo(() => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const result = Array.from({ length: 7 }, (_, i) => {
+    return (dashboardData?.sales_trend ?? Array(7).fill("0.00")).map((val, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
       return {
         day: days[d.getDay()],
-        dateStr: d.toDateString(),
-        value: 0,
+        value: parseFloat(val.replace(/,/g, "")),
       };
     });
+  }, [dashboardData]);
 
-    transactionList.forEach((t) => {
-      if (t.type === "Stock out" || t.qty < 0) {
-        const txDate = parseTxDate(t.date);
-        const item = itemList.find((i) => i.itemName === t.item);
-        const price = item ? item.sellingPrice : 0;
-        const val = Math.abs(t.qty) * price;
+  // Most sold items: API returns [{ name, quantity_sold }]
+  const topItems = React.useMemo(() => {
+    return (dashboardData?.most_sold_items ?? []).map((item) => ({
+      name: item.name,
+      units: item.quantity_sold,
+    }));
+  }, [dashboardData]);
 
-        const match = result.find((r) => new Date(r.dateStr).toDateString() === txDate.toDateString());
-        if (match) {
-          match.value += val;
-        }
-      }
-    });
+  // Recent transactions from API
+  const recentTxs = dashboardData?.recent_transaction ?? [];
 
-    return result.map(({ day, value }) => ({ day, value }));
-  }, [transactionList, itemList]);
+  // ── Loading skeleton helper ──────────────────────────────
+  const Skeleton = ({ w = "100%", h = 20 }: { w?: string | number; h?: number }) => (
+    <div
+      style={{
+        width: w,
+        height: h,
+        borderRadius: 6,
+        background: `linear-gradient(90deg, ${c.border} 25%, ${c.surfaceMuted ?? c.border} 50%, ${c.border} 75%)`,
+        backgroundSize: "200% 100%",
+        animation: "shimmer 1.4s infinite",
+      }}
+    />
+  );
+
 
   return (
     <div>
+      {/* Shimmer keyframes injected once */}
+      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+
       {/* Stat Cards — shown based on role */}
       <div
         style={{
@@ -229,8 +221,8 @@ export default function DashboardOverview() {
         <StatCard
           c={c}
           label="Items in stock"
-          value={totalStockQty.toLocaleString()}
-          sub={`Rs ${totalStockValue.toLocaleString()} value`}
+          value={dashboardLoading ? "—" : totalStockQty.toLocaleString()}
+          sub={dashboardLoading ? "Loading..." : `Rs ${totalStockValue} value`}
           icon={Boxes}
           tone="accent"
         />
@@ -238,8 +230,8 @@ export default function DashboardOverview() {
           <StatCard
             c={c}
             label="Active alerts"
-            value={activeAlertsCount.toString()}
-            sub={`${lowStockCount} low stock · ${outOfStockCount} out of stock`}
+            value={dashboardLoading ? "—" : activeAlertsCount.toString()}
+            sub={dashboardLoading ? "Loading..." : `${lowStockCount} low stock · ${outOfStockCount} out of stock`}
             icon={AlertTriangle}
             tone="warn"
           />
@@ -248,7 +240,7 @@ export default function DashboardOverview() {
           <StatCard
             c={c}
             label="Draft POs"
-            value="0"
+            value={dashboardLoading ? "—" : draftPoCount.toString()}
             sub="Awaiting approval"
             icon={ClipboardList}
             tone="accent"
@@ -257,7 +249,7 @@ export default function DashboardOverview() {
         <StatCard
           c={c}
           label="Sold value (This Month)"
-          value={`Rs ${totalSoldValue.toLocaleString()}`}
+          value={dashboardLoading ? "—" : `Rs ${soldValue}`}
           sub={(() => {
             const now = new Date();
             const monthName = now.toLocaleString("en-US", { month: "long" });
@@ -332,7 +324,14 @@ export default function DashboardOverview() {
                     tick={{ fontSize: 11, fill: c.textFaint }}
                     axisLine={false}
                     tickLine={false}
-                    width={42}
+                    width={52}
+                    tickFormatter={(v: number) =>
+                      v >= 1_000_000
+                        ? `${(v / 1_000_000).toFixed(1)}M`
+                        : v >= 1_000
+                          ? `${(v / 1_000).toFixed(1)}K`
+                          : `${v}`
+                    }
                   />
                   <Tooltip
                     contentStyle={{
@@ -341,6 +340,10 @@ export default function DashboardOverview() {
                       borderRadius: 8,
                       fontSize: 12,
                     }}
+                    formatter={(value) => [
+                      `Rs ${(+(value ?? 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                      "Sales",
+                    ]}
                   />
                   <Area
                     type="monotone"
@@ -378,7 +381,7 @@ export default function DashboardOverview() {
                 <BarChart
                   data={topItems}
                   layout="vertical"
-                  margin={{ left: 0, right: 16, top: 0, bottom: 0 }}
+                  margin={{ left: 4, right: 16, top: 0, bottom: 0 }}
                 >
                   <CartesianGrid
                     stroke={c.border}
@@ -394,10 +397,29 @@ export default function DashboardOverview() {
                   <YAxis
                     dataKey="name"
                     type="category"
-                    tick={{ fontSize: 11.5, fill: c.textMuted }}
                     axisLine={false}
                     tickLine={false}
-                    width={92}
+                    width={140}
+                    tick={(props: any) => {
+                      const { x, y, payload } = props;
+                      const maxChars = 18;
+                      const label =
+                        payload.value.length > maxChars
+                          ? payload.value.slice(0, maxChars - 1) + "…"
+                          : payload.value;
+                      return (
+                        <text
+                          x={x}
+                          y={y}
+                          dy={4}
+                          textAnchor="end"
+                          fill={c.textMuted}
+                          fontSize={11.5}
+                        >
+                          {label}
+                        </text>
+                      );
+                    }}
                   />
                   <Tooltip
                     contentStyle={{
@@ -407,6 +429,10 @@ export default function DashboardOverview() {
                       fontSize: 12,
                     }}
                     cursor={{ fill: c.surfaceMuted }}
+                    formatter={(value, _name, props) => [
+                      `${+(value ?? 0)} units`,
+                      (props as any)?.payload?.name ?? "",
+                    ]}
                   />
                   <Bar
                     dataKey="units"
@@ -455,7 +481,7 @@ export default function DashboardOverview() {
                   background: c.surfaceMuted,
                 }}
               >
-                {["ID", "Item", "Type", "Qty", "User", "When"].map((h) => (
+                {["Item", "Type", "Qty", "User", "When"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -470,10 +496,16 @@ export default function DashboardOverview() {
               </tr>
             </thead>
             <tbody>
-              {recentTxs.length === 0 ? (
+              {dashboardLoading ? (
+                <tr>
+                  <td colSpan={5} style={{ padding: 20 }}>
+                    <Skeleton h={14} />
+                  </td>
+                </tr>
+              ) : recentTxs.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={5}
                     style={{
                       padding: "20px",
                       textAlign: "center",
@@ -486,19 +518,11 @@ export default function DashboardOverview() {
               ) : (
                 recentTxs.map((t) => (
                   <tr
-                    key={t.id}
+                    key={t.transaction_id}
                     style={{ borderTop: `1px solid ${c.border}` }}
                   >
-                    <td
-                      style={{
-                        padding: "10px 20px",
-                        color: c.textFaint,
-                      }}
-                    >
-                      {t.id}
-                    </td>
                     <td style={{ padding: "10px 20px", fontWeight: 500 }}>
-                      {t.item}
+                      {t.item_name}
                     </td>
                     <td style={{ padding: "10px 20px" }}>
                       <span
@@ -508,42 +532,32 @@ export default function DashboardOverview() {
                           padding: "3px 9px",
                           borderRadius: 999,
                           background:
-                            t.type === "Stock in"
+                            t.transaction_type === "STOCK_IN"
                               ? c.accentSoft
                               : c.dangerSoft,
                           color:
-                            t.type === "Stock in"
+                            t.transaction_type === "STOCK_IN"
                               ? c.accent
                               : c.danger,
                         }}
                       >
-                        {t.type}
+                        {t.transaction_type === "STOCK_IN" ? "Stock in" : "Stock out"}
                       </span>
                     </td>
                     <td
                       style={{
                         padding: "10px 20px",
-                        color: t.qty < 0 ? c.danger : c.accent,
+                        color: t.transaction_type === "STOCK_OUT" ? c.danger : c.accent,
                         fontWeight: 600,
                       }}
                     >
-                      {t.qty > 0 ? `+${t.qty}` : t.qty}
+                      {t.transaction_type === "STOCK_IN" ? `+${t.quantity}` : `-${t.quantity}`}
                     </td>
-                    <td
-                      style={{
-                        padding: "10px 20px",
-                        color: c.textMuted,
-                      }}
-                    >
-                      {t.user}
+                    <td style={{ padding: "10px 20px", color: c.textMuted }}>
+                      {t.user_name}
                     </td>
-                    <td
-                      style={{
-                        padding: "10px 20px",
-                        color: c.textFaint,
-                      }}
-                    >
-                      {t.date}
+                    <td style={{ padding: "10px 20px", color: c.textFaint }}>
+                      {new Date(t.transaction_date).toLocaleString()}
                     </td>
                   </tr>
                 ))

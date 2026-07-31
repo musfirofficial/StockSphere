@@ -42,7 +42,7 @@ class ReportCreate(ReportBase):
 
 class ReportResponse(ReportBase):
     report_id: uuid.UUID
-    generated_by: uuid.UUID
+    generated_by: Optional[uuid.UUID] = None
     generated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

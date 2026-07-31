@@ -17,134 +17,8 @@ import {
 import { useTheme } from "../ThemeContext";
 import { useData, Item, Category, Supplier } from "../DataContext";
 import { isReadOnly, isSalesRole } from "@/lib/roles";
-
-// ── Checkbox ───────────────────────────────────────────────
-function Cb({
-  checked,
-  onChange,
-  c,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  c: any;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      style={{
-        width: 17,
-        height: 17,
-        borderRadius: 5,
-        flexShrink: 0,
-        border: `1.5px solid ${checked ? c.accent : c.border}`,
-        background: checked ? c.accent : "transparent",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        padding: 0,
-      }}
-    >
-      {checked && <Check size={11} strokeWidth={3} color="#fff" />}
-    </button>
-  );
-}
-
-// ── Status Badge ───────────────────────────────────────────
-function StatusBadge({ active, c }: { active: boolean; c: any }) {
-  return (
-    <span
-      style={{
-        fontSize: 11.5,
-        fontWeight: 600,
-        padding: "3px 9px",
-        borderRadius: 999,
-        background: active ? c.accentSoft : c.surfaceMuted,
-        color: active ? c.accent : c.textFaint,
-      }}
-    >
-      {active ? "Active" : "Inactive"}
-    </span>
-  );
-}
-
-// ── Modal ──────────────────────────────────────────────────
-interface ModalProps {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  c: any;
-  width?: number;
-}
-function Modal({ title, onClose, children, c, width = 440 }: ModalProps) {
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(10,10,8,0.5)",
-        zIndex: 999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width,
-          maxWidth: "100%",
-          background: c.surface,
-          border: `1px solid ${c.border}`,
-          borderRadius: 14,
-          padding: 22,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 18,
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: 15, fontWeight: 600 }}>{title}</span>
-          <button
-            onClick={onClose}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              border: "none",
-              background: c.surfaceMuted,
-              color: c.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-        <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
+import { apiFetch } from "@/lib/api";
+import { Checkbox as Cb, StatusBadge, Modal, SearchBar, Pagination, ConfirmDeleteModal } from "@/components/ui";
 
 interface FieldProps {
   label: string;
@@ -205,6 +79,18 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
   const [reorderQuantity, setReorderQuantity] = useState(0);
   const [active, setActive] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!category && categoryList.length > 0) {
+      setCategory(categoryList[0].name);
+    }
+  }, [categoryList, category]);
+
+  useEffect(() => {
+    if (!supplier && supplierList.length > 0) {
+      setSupplier(supplierList[0].supplierName);
+    }
+  }, [supplierList, supplier]);
 
   const handleSubmit = () => {
     setError("");
@@ -423,80 +309,27 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
   );
 }
 
-// ── Delete Item Confirmation Modal ─────────────────────────
-interface DeleteItemModalProps {
-  item: Item;
-  onClose: () => void;
-  onConfirm: () => void;
-  c: any;
-}
-function DeleteItemModal({ item, onClose, onConfirm, c }: DeleteItemModalProps) {
-  return (
-    <Modal title="Delete Item" onClose={onClose} c={c} width={380}>
-      <p
-        style={{
-          fontSize: 13.5,
-          color: c.textMuted,
-          lineHeight: 1.6,
-          marginBottom: 20,
-        }}
-      >
-        Delete{" "}
-        <span style={{ color: c.text, fontWeight: 600 }}>
-          {item.itemName}
-        </span>{" "}
-        ({item.sku})? This will remove the item details. This action cannot be undone.
-      </p>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: `1px solid ${c.border}`,
-            background: c.surface,
-            color: c.text,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: c.danger,
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Delete item
-        </button>
-      </div>
-    </Modal>
-  );
-}
+
 
 // ── Main Page Component ─────────────────────────────────────
 export default function ItemsPage() {
   const { mode, c } = useTheme();
   const {
     itemList,
+    setItemList,
     categoryList,
+    setCategoryList,
     supplierList,
+    setSupplierList,
     setHeaderActions,
     loggedInUser,
     addItem,
     saveItemEdit,
     deleteItem,
+    fetchCategories,
+    fetchSuppliers,
+    fetchItems,
+    refreshItems,
   } = useData();
 
   // Derive read-only and sales flags from role
@@ -646,26 +479,163 @@ export default function ItemsPage() {
     }
   };
 
-  const handleSaveEdit = (form: Partial<Item>) => {
-    setEditError("");
-    if (!form.itemName?.trim() || !form.sku?.trim() || !form.unit?.trim() || !form.category || !form.supplier) {
-      setEditError("Item Name, SKU, Category, Supplier, and Unit are required.");
+  // Load categories, suppliers, and items from backend API
+  const loadCategoriesAndSuppliers = async () => {
+    try {
+      await Promise.all([
+        fetchCategories(),
+        fetchSuppliers(),
+      ]);
+    } catch (err: any) {
+      console.error("Failed to load categories/suppliers:", err);
+    }
+  };
+
+  const loadItemsFromBackend = async () => {
+    try {
+      const data = await apiFetch<any[]>("/items/");
+      const mapped: Item[] = data.map((item: any) => ({
+        id: item.item_id,
+        sku: item.sku,
+        itemName: item.item_name,
+        description: item.description || "",
+        category: item.category_name || (categoryList.find((c) => c.id === item.category_id)?.name) || "",
+        supplier: item.supplier_name || (supplierList.find((s) => s.id === item.supplier_id)?.supplierName) || "",
+        quantity: item.quantity_in_stock,
+        unit: item.unit,
+        costPrice: item.cost_price ?? null,
+        sellingPrice: item.selling_price,
+        reorderLevel: item.reorder_level,
+        reorderQuantity: item.reorder_quantity,
+        active: item.is_active,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      }));
+      setItemList(mapped);
+    } catch (err: any) {
+      console.error("Failed to load items from backend:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadCategoriesAndSuppliers();
+    fetchItems();
+  }, []);
+
+  const handleCreateItem = async (newItem: any) => {
+    // Find category_id and supplier_id from categoryList and supplierList
+    const cat = categoryList.find((c) => c.name === newItem.category);
+    const supp = supplierList.find((s) => s.supplierName === newItem.supplier);
+
+    if (!cat) {
+      alert("Selected category is invalid.");
+      return;
+    }
+    if (!supp) {
+      alert("Selected supplier is invalid.");
       return;
     }
 
-    saveItemEdit(form);
-    setSelectedItem(form as Item);
-    setIsEditing(false);
+    try {
+      await apiFetch("/items/", {
+        method: "POST",
+        body: JSON.stringify({
+          item_name: newItem.itemName,
+          sku: newItem.sku,
+          description: newItem.description || null,
+          category_id: cat.id,
+          supplier_id: supp.id,
+          quantity_in_stock: Number(newItem.quantity) || 0,
+          reorder_quantity: Number(newItem.reorderQuantity) || 0,
+          unit: newItem.unit,
+          cost_price: Number(newItem.costPrice) || 0.01,
+          selling_price: Number(newItem.sellingPrice) || 0.01,
+          reorder_level: Number(newItem.reorderLevel) || 0,
+        }),
+      });
+      await refreshItems();
+      setAddItemOpen(false);
+      setPage(1);
+    } catch (err: any) {
+      alert(err.message || "Failed to create item.");
+    }
   };
 
-  const handleDeleteConfirm = () => {
-    if (!itemToDelete) return;
-    deleteItem(itemToDelete.id);
-    setSelected((prev) => prev.filter((x) => x !== itemToDelete.id));
-    if (selectedItem?.id === itemToDelete.id) {
-      setSelectedItem(null);
+  const handleSaveEdit = async (form: Partial<Item>) => {
+    setEditError("");
+    if (!form.itemName?.trim() || !form.sku?.trim() || !form.unit?.trim() || !form.category) {
+      setEditError("Item Name, SKU, Category, and Unit are required.");
+      return;
     }
-    setItemToDelete(null);
+
+    const cat = categoryList.find((c) => c.name === form.category);
+    const supp = supplierList.find((s) => s.supplierName === form.supplier);
+
+    try {
+      const body: any = {
+        item_name: form.itemName,
+        sku: form.sku,
+        description: form.description || null,
+        unit: form.unit,
+        selling_price: Number(form.sellingPrice) || undefined,
+        reorder_level: Number(form.reorderLevel) || undefined,
+        reorder_quantity: Number(form.reorderQuantity) || undefined,
+        is_active: form.active,
+      };
+
+      if (form.costPrice !== null && form.costPrice !== undefined) {
+        body.cost_price = Number(form.costPrice);
+      }
+      if (cat) body.category_id = cat.id;
+      if (supp) body.supplier_id = supp.id;
+
+      const updated = await apiFetch<any>(`/items/${form.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+
+      await refreshItems();
+
+      const updatedMapped: Item = {
+        id: updated.item_id,
+        sku: updated.sku,
+        itemName: updated.item_name,
+        description: updated.description || "",
+        category: updated.category_name || form.category || "",
+        supplier: updated.supplier_name || form.supplier || "",
+        quantity: updated.quantity_in_stock,
+        unit: updated.unit,
+        costPrice: updated.cost_price ?? null,
+        sellingPrice: updated.selling_price,
+        reorderLevel: updated.reorder_level,
+        reorderQuantity: updated.reorder_quantity,
+        active: updated.is_active,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+      };
+
+      setSelectedItem(updatedMapped);
+      setIsEditing(false);
+    } catch (err: any) {
+      setEditError(err.message || "Failed to update item.");
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    try {
+      await apiFetch(`/items/${itemToDelete.id}`, {
+        method: "DELETE",
+      });
+      await refreshItems();
+      setSelected((prev) => prev.filter((x) => x !== itemToDelete.id));
+      if (selectedItem?.id === itemToDelete.id) {
+        setSelectedItem(null);
+      }
+      setItemToDelete(null);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete item.");
+    }
   };
 
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -1025,38 +995,16 @@ export default function ItemsPage() {
               )}
 
               {/* Text Search Bar */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: `1px solid ${c.border}`,
-                  background: c.inputBg,
-                  maxWidth: 220,
-                  width: "100%",
+              <SearchBar
+                value={itemSearch}
+                onChange={(val) => {
+                  setItemSearch(val);
+                  setPage(1);
                 }}
-              >
-                <Search size={14} color={c.textFaint} />
-                <input
-                  value={itemSearch}
-                  onChange={(e) => {
-                    setItemSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search items..."
-                  style={{
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    color: c.text,
-                    fontSize: 13,
-                    width: "100%",
-                    fontFamily: "inherit",
-                  }}
-                />
-              </div>
+                placeholder="Search items..."
+                c={c}
+                maxWidth={220}
+              />
             </div>
           </div>
 
@@ -1167,8 +1115,7 @@ export default function ItemsPage() {
                           {item.category}
                         </td>
                         <td style={{ padding: "11px 20px" }}>
-                          {/* Show 'No Access' for Sales role when supplier is not provided by API */}
-                          {isSales && !item.supplier ? (
+                          {!item.supplier ? (
                             <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
                               No Access
                             </span>
@@ -1244,82 +1191,15 @@ export default function ItemsPage() {
           </div>
 
           {/* Pagination */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "13px 20px",
-              borderTop: `1px solid ${c.border}`,
-              flexShrink: 0,
-            }}
-          >
-            <span style={{ fontSize: 12, color: c.textFaint }}>
-              Showing {totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-              {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} items
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: page === 1 ? "default" : "pointer",
-                  opacity: page === 1 ? 0.4 : 1,
-                }}
-              >
-                <ChevronLeft size={14} />
-              </button>
-              {pageNums.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPage(n)}
-                  style={{
-                    minWidth: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    padding: "0 6px",
-                    border: `1px solid ${n === page ? c.accent : c.border}`,
-                    background: n === page ? c.accentSoft : c.surface,
-                    color: n === page ? c.accent : c.textMuted,
-                    fontSize: 12.5,
-                    fontWeight: n === page ? 600 : 500,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: page === totalPages ? "default" : "pointer",
-                  opacity: page === totalPages ? 0.4 : 1,
-                }}
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalCount={totalCount}
+            pageSize={PAGE_SIZE}
+            itemLabel="items"
+            onPageChange={setPage}
+            c={c}
+          />
         </div>
 
         {/* ── Item Detail Slide Panel ── */}
@@ -1450,7 +1330,7 @@ export default function ItemsPage() {
                         </Field>
                         <Field label="Supplier" c={c}>
                           <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {isSales && !selectedItem.supplier ? (
+                            {!selectedItem.supplier ? (
                               <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
                                 No Access
                               </span>
@@ -1479,7 +1359,13 @@ export default function ItemsPage() {
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                         <Field label="Cost Price" c={c}>
                           <div style={{ fontSize: 13.5, fontWeight: 600 }}>
-                            Rs {selectedItem.costPrice.toLocaleString()}
+                            {selectedItem.costPrice == null ? (
+                              <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
+                                No Access
+                              </span>
+                            ) : (
+                              `Rs ${selectedItem.costPrice.toLocaleString()}`
+                            )}
                           </div>
                         </Field>
                         <Field label="Selling Price" c={c}>
@@ -1787,11 +1673,7 @@ export default function ItemsPage() {
       {addItemOpen && (
         <CreateItemModal
           onClose={() => setAddItemOpen(false)}
-          onSave={(item) => {
-            addItem(item);
-            setAddItemOpen(false);
-            setPage(1);
-          }}
+          onSave={handleCreateItem}
           categoryList={categoryList}
           supplierList={supplierList}
           c={c}
@@ -1799,8 +1681,11 @@ export default function ItemsPage() {
       )}
 
       {itemToDelete && (
-        <DeleteItemModal
-          item={itemToDelete}
+        <ConfirmDeleteModal
+          title="Delete Item"
+          itemName={itemToDelete.itemName}
+          itemType="item"
+          message={`Delete ${itemToDelete.itemName} (${itemToDelete.sku})? This will remove the item details. This action cannot be undone.`}
           onClose={() => setItemToDelete(null)}
           onConfirm={handleDeleteConfirm}
           c={c}

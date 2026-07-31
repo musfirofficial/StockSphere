@@ -18,12 +18,18 @@ import {
   getItemCurrentQty,
 } from "../DataContext";
 import { isReadOnly } from "@/lib/roles";
+import { Pagination, SearchBar } from "@/components/ui";
 
 type BulkRow = { item: string; type: "Stock in" | "Stock out"; qty: number };
 
 export default function TransactionsPage() {
   const { c } = useTheme();
-  const { transactionList, itemList, loggedInUser, recordTransactions, setHeaderActions } = useData();
+  const { transactionList, itemList, loggedInUser, recordTransactions, setHeaderActions, fetchTransactions, fetchItems, refreshTransactions, refreshItems } = useData();
+
+  useEffect(() => {
+    fetchTransactions();
+    fetchItems();
+  }, []);
 
   // Derive read-only mode from role (Auditor & Sales cannot create transactions)
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "transactions");
@@ -147,6 +153,9 @@ export default function TransactionsPage() {
       setBulkRows([]);
       setIsAdding(false);
       setPage(1);
+      // Refresh transaction list and item stock from backend
+      refreshTransactions();
+      refreshItems();
     } else {
       setRecordError(
         result.completed > 0
@@ -347,119 +356,15 @@ export default function TransactionsPage() {
             </div>
 
             {/* Pagination */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "13px 20px",
-                borderTop: `1px solid ${c.border}`,
-                flexShrink: 0,
-              }}
-            >
-              <span style={{ fontSize: 12, color: c.textFaint }}>
-                {filtered.length === 0
-                  ? "No records"
-                  : `${(page - 1) * PAGE + 1}–${Math.min(
-                      page * PAGE,
-                      filtered.length
-                    )} of ${filtered.length}`}
-              </span>
-              <div style={{ display: "flex", gap: 5 }}>
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    border: `1px solid ${c.border}`,
-                    background: c.surface,
-                    color: c.textMuted,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: page === 1 ? "default" : "pointer",
-                    opacity: page === 1 ? 0.4 : 1,
-                  }}
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                {(() => {
-                  // Build windowed page list: 1 … [p-1] [p] [p+1] … N
-                  const pages: (number | "…")[] = [];
-                  const add = (n: number) => {
-                    if (!pages.includes(n)) pages.push(n);
-                  };
-                  add(1);
-                  if (page > 3) pages.push("…");
-                  if (page > 2) add(page - 1);
-                  if (page !== 1 && page !== totalPages) add(page);
-                  if (page < totalPages - 1) add(page + 1);
-                  if (page < totalPages - 2) pages.push("…");
-                  add(totalPages);
-
-                  return pages.map((n, idx) =>
-                    n === "…" ? (
-                      <span
-                        key={`ellipsis-${idx}`}
-                        style={{
-                          width: 28,
-                          height: 28,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 12,
-                          color: c.textFaint,
-                          userSelect: "none",
-                        }}
-                      >
-                        …
-                      </span>
-                    ) : (
-                      <button
-                        key={n}
-                        onClick={() => setPage(n)}
-                        style={{
-                          minWidth: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          padding: "0 6px",
-                          border: `1px solid ${n === page ? c.accent : c.border}`,
-                          background: n === page ? c.accentSoft : c.surface,
-                          color: n === page ? c.accent : c.textMuted,
-                          fontSize: 12.5,
-                          fontWeight: n === page ? 600 : 500,
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        {n}
-                      </button>
-                    )
-                  );
-                })()}
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    border: `1px solid ${c.border}`,
-                    background: c.surface,
-                    color: c.textMuted,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: page === totalPages ? "default" : "pointer",
-                    opacity: page === totalPages ? 0.4 : 1,
-                  }}
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={filtered.length}
+              pageSize={PAGE}
+              itemLabel="transactions"
+              onPageChange={setPage}
+              c={c}
+            />
           </div>
         </div>
 

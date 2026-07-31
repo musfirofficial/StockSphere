@@ -126,7 +126,23 @@ export default function LoginPage() {
         );
       }
 
-      // 5. Redirect to dashboard
+      // 5. Pre-fetch dashboard data so the dashboard page loads instantly
+      try {
+        const dashRes = await fetch("http://localhost:8000/dashboard/", {
+          headers: {
+            Authorization: `Bearer ${data.access_token}`,
+            "Content-Type": "application/json",
+          },
+        });
+        if (dashRes.ok) {
+          const dashData = await dashRes.json();
+          sessionStorage.setItem("dashboardData", JSON.stringify(dashData));
+        }
+      } catch {
+        // Non-fatal: dashboard will re-fetch on its own if this fails
+      }
+
+      // 6. Redirect to dashboard
       router.push("/dashboard");
     } catch (err) {
       setError("Unable to connect to the server.");

@@ -15,6 +15,7 @@ import {
 import { useTheme } from "../ThemeContext";
 import { useData } from "../DataContext";
 import { apiFetch } from "@/lib/api";
+import { Checkbox as Cb, Modal, SearchBar, Pagination, ConfirmDeleteModal } from "@/components/ui";
 import { isReadOnly } from "@/lib/roles";
 
 export interface Category {
@@ -23,116 +24,6 @@ export interface Category {
   description?: string;
   created_at: string;
   updated_at: string;
-}
-
-// ── Checkbox ───────────────────────────────────────────────
-function Cb({
-  checked,
-  onChange,
-  c,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  c: any;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      style={{
-        width: 17,
-        height: 17,
-        borderRadius: 5,
-        flexShrink: 0,
-        border: `1.5px solid ${checked ? c.accent : c.border}`,
-        background: checked ? c.accent : "transparent",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        padding: 0,
-      }}
-    >
-      {checked && <Check size={11} strokeWidth={3} color="#fff" />}
-    </button>
-  );
-}
-
-// ── Modal ──────────────────────────────────────────────────
-interface ModalProps {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-  c: any;
-  width?: number;
-}
-function Modal({ title, onClose, children, c, width = 440 }: ModalProps) {
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(10,10,8,0.5)",
-        zIndex: 999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width,
-          maxWidth: "100%",
-          background: c.surface,
-          border: `1px solid ${c.border}`,
-          borderRadius: 14,
-          padding: 22,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 18,
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: 15, fontWeight: 600 }}>{title}</span>
-          <button
-            onClick={onClose}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
-              border: "none",
-              background: c.surfaceMuted,
-              color: c.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-            }}
-          >
-            <X size={15} />
-          </button>
-        </div>
-        <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 interface FieldProps {
@@ -288,77 +179,12 @@ function CategoryModal({ initialData, onClose, onSave, c }: CategoryModalProps) 
   );
 }
 
-// ── Delete Category Confirmation Modal ──────────────────────
-interface DeleteCategoryModalProps {
-  category: Category;
-  onClose: () => void;
-  onConfirm: () => void;
-  c: any;
-}
-function DeleteCategoryModal({
-  category,
-  onClose,
-  onConfirm,
-  c,
-}: DeleteCategoryModalProps) {
-  return (
-    <Modal title="Delete category" onClose={onClose} c={c} width={380}>
-      <p
-        style={{
-          fontSize: 13.5,
-          color: c.textMuted,
-          lineHeight: 1.6,
-          marginBottom: 20,
-        }}
-      >
-        Delete{" "}
-        <span style={{ color: c.text, fontWeight: 600 }}>
-          {category.category_name}
-        </span>
-        ? This action cannot be undone.
-      </p>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            border: `1px solid ${c.border}`,
-            background: c.surface,
-            color: c.text,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onConfirm}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "none",
-            background: c.danger,
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          Delete category
-        </button>
-      </div>
-    </Modal>
-  );
-}
+
 
 // ── Main Page Component ─────────────────────────────────────
 export default function CategoriesPage() {
   const { c } = useTheme();
-  const { setHeaderActions, loggedInUser } = useData();
+  const { setHeaderActions, loggedInUser, refreshCategories } = useData();
 
   // Derive read-only mode from role
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "categories");
@@ -444,7 +270,8 @@ export default function CategoriesPage() {
         }),
       });
     }
-    loadCategories();
+    await loadCategories();
+    refreshCategories();
   };
 
   const handleDeleteConfirm = async () => {
@@ -453,7 +280,8 @@ export default function CategoriesPage() {
       await apiFetch(`/categories/${categoryToDelete.category_id}`, { method: "DELETE" });
       setSelected((prev) => prev.filter((x) => x !== categoryToDelete.category_id));
       setCategoryToDelete(null);
-      loadCategories();
+      await loadCategories();
+      refreshCategories();
     } catch (err: any) {
       alert(err.message || "Failed to delete category");
     }
@@ -465,10 +293,10 @@ export default function CategoriesPage() {
     const list = !q
       ? categories
       : categories.filter(
-          (cat) =>
-            cat.category_name.toLowerCase().includes(q) ||
-            (cat.description && cat.description.toLowerCase().includes(q))
-        );
+        (cat) =>
+          cat.category_name.toLowerCase().includes(q) ||
+          (cat.description && cat.description.toLowerCase().includes(q))
+      );
     return [...list].sort((a, b) => a.category_name.localeCompare(b.category_name));
   }, [categories, categorySearch]);
 
@@ -583,39 +411,16 @@ export default function CategoriesPage() {
                 </button>
               )}
               {/* Search bar */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: `1px solid ${c.border}`,
-                  background: c.inputBg,
-                  maxWidth: 260,
-                  width: "100%",
-                  marginLeft: "auto",
+              <SearchBar
+                value={categorySearch}
+                onChange={(val) => {
+                  setCategorySearch(val);
+                  setPage(1);
                 }}
-              >
-                <Search size={14} color={c.textFaint} />
-                <input
-                  value={categorySearch}
-                  onChange={(e) => {
-                    setCategorySearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search categories..."
-                  style={{
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    color: c.text,
-                    fontSize: 13,
-                    width: "100%",
-                    fontFamily: "inherit",
-                  }}
-                />
-              </div>
+                placeholder="Search categories..."
+                c={c}
+                maxWidth={260}
+              />
             </div>
           </div>
 
@@ -792,82 +597,15 @@ export default function CategoriesPage() {
           </div>
 
           {/* Pagination Bar */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "13px 20px",
-              borderTop: `1px solid ${c.border}`,
-              flexShrink: 0,
-            }}
-          >
-            <span style={{ fontSize: 12, color: c.textFaint }}>
-              Showing {totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-              {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount} categories
-            </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: page === 1 ? "default" : "pointer",
-                  opacity: page === 1 ? 0.4 : 1,
-                }}
-              >
-                <ChevronLeft size={14} />
-              </button>
-              {pageNums.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPage(n)}
-                  style={{
-                    minWidth: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    padding: "0 6px",
-                    border: `1px solid ${n === page ? c.accent : c.border}`,
-                    background: n === page ? c.accentSoft : c.surface,
-                    color: n === page ? c.accent : c.textMuted,
-                    fontSize: 12.5,
-                    fontWeight: n === page ? 600 : 500,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: page === totalPages ? "default" : "pointer",
-                  opacity: page === totalPages ? 0.4 : 1,
-                }}
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalCount={totalCount}
+            pageSize={PAGE_SIZE}
+            itemLabel="categories"
+            onPageChange={setPage}
+            c={c}
+          />
         </div>
       </div>
 
@@ -892,8 +630,10 @@ export default function CategoriesPage() {
 
       {/* Delete Category Confirmation Modal */}
       {categoryToDelete && (
-        <DeleteCategoryModal
-          category={categoryToDelete}
+        <ConfirmDeleteModal
+          title="Delete category"
+          itemName={categoryToDelete.category_name}
+          itemType="category"
           onClose={() => setCategoryToDelete(null)}
           onConfirm={handleDeleteConfirm}
           c={c}

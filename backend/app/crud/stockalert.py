@@ -1,8 +1,10 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from app.models import AlertStatus, StockAlert, Item
 from app.models import local_tz
 from datetime import datetime
+from typing import Sequence
 import uuid
 
 
@@ -24,12 +26,16 @@ async def create_stockalert(
     return stockalert
 
 
-# ------------------------ Get existing alert crud ------------------------ #
+# ------------------------ Get existing active alert crud ------------------- #
 async def get_item_alert(db: AsyncSession, item: Item) -> StockAlert | None:
     result = await db.execute(
-        select(StockAlert).where(StockAlert.item_id == item.item_id)
+        select(StockAlert).where(
+            StockAlert.item_id == item.item_id,
+            StockAlert.status != AlertStatus.RESOLVED,
+        )
     )
     return result.scalar_one_or_none()
+
 
 
 # ------------------------ Update existing alert crud ------------------------ #
@@ -44,3 +50,14 @@ async def update_alert_status(
     await db.flush()
     await db.refresh(db_alert)
     return db_alert
+
+
+# ------------------------ Get all stock alerts crud ------------------------ #
+async def get_all_stockalerts(db: AsyncSession) -> Sequence[StockAlert]:
+    query = (
+        select(StockAlert)
+        .options(selectinload(StockAlert.supplier), selectinload(StockAlert.item))
+        .order_by(StockAlert.created_at.desc())
+    )
+    result = await db.execute(query)
+    return result.scalars().all()
