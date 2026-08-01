@@ -215,9 +215,7 @@ class Report(Base):
     report_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    report_name: Mapped[str] = mapped_column(
-        String(100), nullable=False, unique=True, index=True
-    )
+    report_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     report_type: Mapped[ReportType] = mapped_column(Enum(ReportType), nullable=False)
     generated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

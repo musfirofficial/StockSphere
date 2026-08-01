@@ -9,12 +9,27 @@ interface ModalProps {
   children: React.ReactNode;
   c: any;
   width?: number;
+  closeOnOverlayClick?: boolean;
 }
 
-export function Modal({ title, onClose, children, c, width = 440 }: ModalProps) {
+export function Modal({
+  title,
+  onClose,
+  children,
+  c,
+  width = 440,
+  closeOnOverlayClick = true,
+}: ModalProps) {
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (closeOnOverlayClick && e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
   return (
     <div
-      onClick={onClose}
+      onClick={handleOverlayClick}
+      onMouseDown={handleOverlayClick}
       style={{
         position: "fixed",
         inset: 0,
@@ -28,6 +43,7 @@ export function Modal({ title, onClose, children, c, width = 440 }: ModalProps) 
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
         style={{
           width,
           maxWidth: "100%",
@@ -68,3 +84,4 @@ export function Modal({ title, onClose, children, c, width = 440 }: ModalProps) 
     </div>
   );
 }
+

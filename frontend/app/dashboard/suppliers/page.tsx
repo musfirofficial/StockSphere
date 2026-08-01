@@ -56,6 +56,10 @@ const inp = (c: any) => ({
   fontFamily: "inherit",
 });
 
+// ============================================================================
+// Helper Components & Sub-Modals
+// ============================================================================
+
 // ── Create Supplier Modal ──────────────────────────────────
 interface CreateSupplierModalProps {
   onClose: () => void;
@@ -98,7 +102,7 @@ function CreateSupplierModal({ onClose, onSave, c }: CreateSupplierModalProps) {
   };
 
   return (
-    <Modal title="Create New Supplier" onClose={onClose} c={c} width={480}>
+    <Modal title="Create New Supplier" onClose={onClose} c={c} width={480} closeOnOverlayClick={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {error && (
           <div
@@ -142,7 +146,7 @@ function CreateSupplierModal({ onClose, onSave, c }: CreateSupplierModalProps) {
               style={inp(c)}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="+94 71 234 5678"
+              placeholder="071 234 5678"
             />
           </Field>
           <Field label="Email Address" c={c}>
@@ -242,7 +246,10 @@ function CreateSupplierModal({ onClose, onSave, c }: CreateSupplierModalProps) {
 
 
 
-// ── Main Page Component ─────────────────────────────────────
+// ============================================================================
+// Main Page Component
+// ============================================================================
+
 export default function SuppliersPage() {
   const { mode, c } = useTheme();
   const { supplierList, setSupplierList, setHeaderActions, addSupplier, saveSupplierEdit, deleteSupplier, loggedInUser, fetchSuppliers, refreshSuppliers } = useData();
@@ -251,7 +258,13 @@ export default function SuppliersPage() {
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "suppliers");
 
   // Selected checkbox rows
+  // --------------------------------------------------------------------------
+  // State Management
+  // --------------------------------------------------------------------------
   const [selected, setSelected] = useState<string[]>([]);
+  // --------------------------------------------------------------------------
+  // Filter & Pagination Calculations
+  // --------------------------------------------------------------------------
   // Search filter
   const [supplierSearch, setSupplierSearch] = useState("");
 
@@ -279,7 +292,7 @@ export default function SuppliersPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Dynamically set header buttons in shared layout — hidden for read-only roles
+  // Header button — hidden for read-only roles
   useEffect(() => {
     if (readOnly) {
       setHeaderActions(null);
@@ -309,7 +322,6 @@ export default function SuppliersPage() {
     return () => setHeaderActions(null);
   }, [c, setHeaderActions, readOnly]);
 
-  // Sync details panel state
   useEffect(() => {
     if (selectedSupplier) {
       setSupplierEditForm(selectedSupplier);
@@ -317,7 +329,13 @@ export default function SuppliersPage() {
     }
   }, [selectedSupplier]);
 
-  // Filter supplier list
+  useEffect(() => {
+    loadSuppliersFromBackend();
+  }, []);
+
+  // --------------------------------------------------------------------------
+  // Filter & Pagination Calculations
+  // --------------------------------------------------------------------------
   const filteredSuppliers = useMemo(() => {
     return supplierList
       .filter((s) => {
@@ -344,7 +362,9 @@ export default function SuppliersPage() {
   const allPageSelected =
     pageSuppliers.length > 0 && pageSuppliers.every((s) => selected.includes(s.id));
 
-  // Handlers
+  // --------------------------------------------------------------------------
+  // Handlers & API Actions
+  // --------------------------------------------------------------------------
   const toggleOne = (id: string, checked: boolean) => {
     setSelected((prev) =>
       checked ? [...prev, id] : prev.filter((x) => x !== id)
@@ -366,7 +386,6 @@ export default function SuppliersPage() {
     }
   };
 
-  // Load suppliers from backend
   const loadSuppliersFromBackend = async () => {
     try {
       await fetchSuppliers();
@@ -374,10 +393,6 @@ export default function SuppliersPage() {
       console.error("Failed to load suppliers from backend:", err);
     }
   };
-
-  useEffect(() => {
-    loadSuppliersFromBackend();
-  }, []);
 
   const handleCreateSupplier = async (s: Partial<Supplier>) => {
     try {
@@ -442,6 +457,9 @@ export default function SuppliersPage() {
 
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
 
+  // ==========================================================================
+  // Render / JSX Structure
+  // ==========================================================================
   return (
     <div style={{ position: "relative", height: "100%", width: "100%" }}>
       <div
@@ -467,6 +485,9 @@ export default function SuppliersPage() {
             overflow: "hidden",
           }}
         >
+          {/* ---------------------------------------------------------------------- */}
+          {/* Toolbar & Search Bar                                                  */}
+          {/* ---------------------------------------------------------------------- */}
           {/* toolbar */}
           <div
             style={{
@@ -476,18 +497,11 @@ export default function SuppliersPage() {
               padding: "13px 20px",
               borderBottom: `1px solid ${c.border}`,
               flexWrap: "wrap",
-              gap: 10,
+              gap: 12,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                flex: 1,
-                minWidth: 250,
-              }}
-            >
+            {/* Selection indicators */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Cb checked={allPageSelected} onChange={toggleAllPage} c={c} />
                 <span
@@ -518,7 +532,19 @@ export default function SuppliersPage() {
                   Deselect all
                 </button>
               )}
-              {/* Search bar */}
+            </div>
+
+            {/* Search */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                flex: 1,
+                justifyContent: "flex-end",
+              }}
+            >
               <SearchBar
                 value={supplierSearch}
                 onChange={(val) => {
@@ -532,6 +558,9 @@ export default function SuppliersPage() {
             </div>
           </div>
 
+          {/* ---------------------------------------------------------------------- */}
+          {/* Data Table                                                            */}
+          {/* ---------------------------------------------------------------------- */}
           {/* table */}
           <div style={{ overflowX: "auto", flex: 1 }}>
             <table
@@ -695,6 +724,9 @@ export default function SuppliersPage() {
             </table>
           </div>
 
+          {/* ---------------------------------------------------------------------- */}
+          {/* Pagination Footer                                                     */}
+          {/* ---------------------------------------------------------------------- */}
           {/* pagination */}
           <Pagination
             page={page}
@@ -1072,6 +1104,9 @@ export default function SuppliersPage() {
         )}
       </div>
 
+      {/* ---------------------------------------------------------------------- */}
+      {/* Modals & Dialogs                                                         */}
+      {/* ---------------------------------------------------------------------- */}
       {/* Modals */}
       {addSupplierOpen && (
         <CreateSupplierModal

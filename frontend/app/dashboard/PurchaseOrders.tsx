@@ -5,7 +5,8 @@ import {
   Plus, Search, ChevronLeft, ChevronRight, X, Check, ArrowLeft, Save, Sparkles, FileText, Trash2
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { ConfirmDeleteModal, Pagination } from "@/components/ui";
+import { ConfirmDeleteModal, Pagination, DataTable } from "@/components/ui";
+
 
 // ── Types ──────────────────────────────────────────────────
 interface Supplier {
@@ -994,32 +995,97 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
             </button>
           </div>
 
-          {/* Table Listing & Filtering */}
-          <div style={{
-            background: c.surface,
-            border: `1px solid ${c.border}`,
-            borderRadius: 14,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            flex: 1
-          }}>
-            {/* Toolbar Filters */}
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "14px 20px",
-              borderBottom: `1px solid ${c.border}`,
-              flexWrap: "wrap",
-              gap: 12
-            }}>
-              {/* Type Filter Buttons */}
+          <DataTable
+            c={c}
+            minWidth={500}
+            columns={[
+              {
+                key: "id",
+                header: "PO ID",
+                render: (po) => (
+                  <span style={{ fontWeight: 600, color: c.text }}>
+                    {po.id.length > 8 ? `${po.id.slice(0, 8)}...` : po.id}
+                  </span>
+                ),
+              },
+              {
+                key: "supplierName",
+                header: "Supplier Name",
+                render: (po) => <span style={{ fontWeight: 500 }}>{po.supplierName}</span>,
+              },
+              {
+                key: "poType",
+                header: "PO Type",
+                render: (po) => (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: "3px 8px",
+                      borderRadius: 999,
+                      background: po.poType === "Draft" ? c.warnSoft : c.accentSoft,
+                      color: po.poType === "Draft" ? c.warn : c.accent,
+                    }}
+                  >
+                    {po.poType}
+                  </span>
+                ),
+              },
+              {
+                key: "createdBy",
+                header: "Created By",
+                render: (po) => <span style={{ color: c.textMuted }}>{po.createdBy || "System"}</span>,
+              },
+              {
+                key: "createdAt",
+                header: "Created At",
+                render: (po) => <span style={{ color: c.textMuted }}>{po.createdAt}</span>,
+              },
+              {
+                key: "actions",
+                header: "",
+                width: 60,
+                align: "right",
+                render: (po) => (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPoToDelete(po);
+                    }}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: c.error || c.danger || "#B3473C",
+                      cursor: "pointer",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(elm) => (elm.currentTarget.style.background = c.warnSoft || "#FCECEB")}
+                    onMouseLeave={(elm) => (elm.currentTarget.style.background = "transparent")}
+                    title="Delete Purchase Order"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                ),
+              },
+            ]}
+            data={paginatedPOs}
+            keyExtractor={(po) => po.id}
+            onRowClick={(po) => handleOpenPO(po)}
+            emptyMessage="No Purchase Orders found."
+            filterSlot={
               <div style={{ display: "flex", gap: 6 }}>
-                {(["All", "Draft", "Generated"] as const).map(t => (
+                {(["All", "Draft", "Generated"] as const).map((t) => (
                   <button
                     key={t}
-                    onClick={() => { setTypeFilter(t); setPage(1); }}
+                    onClick={() => {
+                      setTypeFilter(t);
+                      setPage(1);
+                    }}
                     style={{
                       padding: "6px 12px",
                       borderRadius: 7,
@@ -1029,195 +1095,32 @@ export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps)
                       fontSize: 12.5,
                       fontWeight: 600,
                       cursor: "pointer",
-                      transition: "all 0.15s"
+                      transition: "all 0.15s",
                     }}
                   >
                     {t}
                   </button>
                 ))}
               </div>
-
-              {/* Search PO */}
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 12px",
-                borderRadius: 8,
-                border: `1px solid ${c.border}`,
-                background: c.bg,
-                width: "100%",
-                maxWidth: 260
-              }}>
-                <Search size={14} color={c.textFaint} />
-                <input
-                  value={searchQuery}
-                  onChange={e => { setSearchQuery(e.target.value); setPage(1); }}
-                  placeholder="Search POs..."
-                  style={{
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    color: c.text,
-                    fontSize: 13,
-                    width: "100%",
-                    fontFamily: "inherit"
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* List Table */}
-            <div style={{ overflowX: "auto", flex: 1 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
-                <thead>
-                  <tr style={{ color: c.textFaint, textAlign: "left", background: c.surfaceMuted }}>
-                    {["PO ID", "Supplier Name", "PO Type", "Created By", "Created At"].map(h => (
-                      <th key={h} style={{ padding: "12px 20px", fontWeight: 500, fontSize: 11.5 }}>{h}</th>
-                    ))}
-                    <th style={{ padding: "12px 20px", width: 60 }} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedPOs.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: "40px 20px", textAlign: "center", color: c.textFaint }}>
-                        No Purchase Orders found.
-                      </td>
-                    </tr>
-                  ) : paginatedPOs.map(po => (
-                    <tr
-                      key={po.id}
-                      onClick={() => handleOpenPO(po)}
-                      style={{
-                        borderTop: `1px solid ${c.border}`,
-                        cursor: "pointer",
-                        transition: "background 0.12s"
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = c.surfaceMuted}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    >
-                      <td style={{ padding: "14px 20px", fontWeight: 600, color: c.text }}>{po.id.length > 8 ? `${po.id.slice(0, 8)}...` : po.id}</td>
-                      <td style={{ padding: "14px 20px", fontWeight: 500 }}>{po.supplierName}</td>
-                      <td style={{ padding: "14px 20px" }}>
-                        <span style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          padding: "3px 8px",
-                          borderRadius: 999,
-                          background: po.poType === "Draft" ? c.warnSoft : c.accentSoft,
-                          color: po.poType === "Draft" ? c.warn : c.accent
-                        }}>
-                          {po.poType}
-                        </span>
-                      </td>
-                      <td style={{ padding: "14px 20px", color: c.textMuted }}>{po.createdBy || "System"}</td>
-                      <td style={{ padding: "14px 20px", color: c.textMuted }}>{po.createdAt}</td>
-                      <td style={{ padding: "8px 20px", textAlign: "right" }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPoToDelete(po);
-                          }}
-                          style={{
-                            border: "none",
-                            background: "transparent",
-                            color: c.error || c.danger || "#B3473C",
-                            cursor: "pointer",
-                            padding: "6px 8px",
-                            borderRadius: 6,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            transition: "all 0.15s"
-                          }}
-                          onMouseEnter={elm => elm.currentTarget.style.background = c.warnSoft || "#FCECEB"}
-                          onMouseLeave={elm => elm.currentTarget.style.background = "transparent"}
-                          title="Delete Purchase Order"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination footer */}
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "13px 20px",
-              borderTop: `1px solid ${c.border}`,
-              flexShrink: 0
-            }}>
-              <span style={{ fontSize: 12, color: c.textFaint }}>
-                Showing {filteredPOList.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredPOList.length)} of {filteredPOList.length} orders
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    border: `1px solid ${c.border}`,
-                    background: c.surface,
-                    color: c.textMuted,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: page === 1 ? "default" : "pointer",
-                    opacity: page === 1 ? 0.4 : 1
-                  }}
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
-                  <button
-                    key={n}
-                    onClick={() => setPage(n)}
-                    style={{
-                      minWidth: 28,
-                      height: 28,
-                      borderRadius: 7,
-                      padding: "0 6px",
-                      border: `1px solid ${n === page ? c.accent : c.border}`,
-                      background: n === page ? c.accentSoft : c.surface,
-                      color: n === page ? c.accent : c.textMuted,
-                      fontSize: 12.5,
-                      fontWeight: n === page ? 600 : 500,
-                      cursor: "pointer"
-                    }}
-                  >
-                    {n}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 7,
-                    border: `1px solid ${c.border}`,
-                    background: c.surface,
-                    color: c.textMuted,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: page === totalPages ? "default" : "pointer",
-                    opacity: page === totalPages ? 0.4 : 1
-                  }}
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
+            }
+            search={{
+              value: searchQuery,
+              onChange: (val) => {
+                setSearchQuery(val);
+                setPage(1);
+              },
+              placeholder: "Search POs...",
+              maxWidth: 220,
+            }}
+            pagination={{
+              page,
+              totalPages,
+              totalCount: filteredPOList.length,
+              pageSize: PAGE_SIZE,
+              itemLabel: "orders",
+              onPageChange: setPage,
+            }}
+          />
         </div>
       )}
 

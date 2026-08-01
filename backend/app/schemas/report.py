@@ -19,9 +19,9 @@ class ReportBase(BaseModel):
     @classmethod
     def clean_input(cls, v: str) -> str:
         v = v.strip()
-        if not re.match(r"^[a-zA-Z0-9\s]+$", v):
+        if not re.match(r"^[a-zA-Z0-9\s_]+$", v):
             raise ValueError(
-                "Report name can only contain letters, numbers, and spaces"
+                "Report name can only contain letters, numbers, spaces, and underscores"
             )
         return v
 
@@ -123,3 +123,18 @@ class StockAlertSummaryData(BaseModel):
     # Visualizations / Breakdown sets
     chart_data: List[AlertTrendPoint]
     supplier_breakdown: List[SupplierAlertMetric]
+
+
+# ---------------------------------------------------------------------------- #
+#                           Schemas for Category Report                        #
+# ---------------------------------------------------------------------------- #
+class CategoryReportMetric(BaseModel):
+    category_id: Optional[uuid.UUID]
+    category_name: str
+    stock_value: Decimal
+    margin_percentage: float
+    space_used_percentage: float
+
+
+class CategoryReportData(BaseModel):
+    categories: List[CategoryReportMetric]

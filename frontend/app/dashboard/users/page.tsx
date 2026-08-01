@@ -107,9 +107,16 @@ interface ModalProps {
   closeOnOverlayClick?: boolean;
 }
 function Modal({ title, onClose, children, c, width = 440, closeOnOverlayClick = true }: ModalProps) {
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (closeOnOverlayClick && e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
   return (
     <div
-      onClick={closeOnOverlayClick ? onClose : undefined}
+      onClick={handleOverlayClick}
+      onMouseDown={handleOverlayClick}
       style={{
         position: "fixed",
         inset: 0,
@@ -123,6 +130,7 @@ function Modal({ title, onClose, children, c, width = 440, closeOnOverlayClick =
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
         style={{
           width,
           maxWidth: "100%",
@@ -314,7 +322,7 @@ function CreateModal({ onClose, onSave, c }: CreateModalProps) {
               style={inp(c)}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="+94 77 123 4567"
+              placeholder="077 123 4567"
             />
           </Field>
         </div>
@@ -633,17 +641,38 @@ export default function UsersPage() {
     };
 
     try {
+      const body: any = {};
+      if (editForm.fullName && editForm.fullName !== selectedUser.fullName) {
+        body.full_name = editForm.fullName;
+      }
+      if (editForm.username && editForm.username !== selectedUser.username) {
+        body.user_name = editForm.username;
+      }
+      if ((editForm.nic || "") !== (selectedUser.nic || "")) {
+        body.nic = editForm.nic || null;
+      }
+      if (editForm.email && editForm.email !== selectedUser.email) {
+        body.email = editForm.email;
+      }
+      if ((editForm.phone || "") !== (selectedUser.phone || "")) {
+        body.phone = editForm.phone || null;
+      }
+      if (editForm.role && editForm.role !== selectedUser.role) {
+        body.role = roleMap[editForm.role];
+      }
+      if (editForm.active !== undefined && editForm.active !== selectedUser.active) {
+        body.is_active = editForm.active;
+      }
+
+      if (Object.keys(body).length === 0) {
+        setProfileSuccess("No changes to save.");
+        setSavingProfile(false);
+        return;
+      }
+
       await apiFetch(`/users/${selectedUser.id}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          full_name: editForm.fullName || undefined,
-          user_name: editForm.username || undefined,
-          nic: editForm.nic || undefined,
-          email: editForm.email || undefined,
-          phone: editForm.phone || undefined,
-          role: editForm.role ? roleMap[editForm.role] : undefined,
-          is_active: editForm.active,
-        }),
+        body: JSON.stringify(body),
       });
 
       setProfileSuccess("Profile details saved successfully!");

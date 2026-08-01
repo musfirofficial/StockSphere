@@ -531,7 +531,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                           : activeItem.key === "purchase_orders"
                             ? "Purchase Orders"
                             : activeItem.key === "items"
-                              ? "Inventory"
+                              ? "Items"
                               : activeItem.key === "categories"
                                 ? "Categories"
                                 : activeItem.key === "reports"
@@ -558,7 +558,11 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                               ? "Manage inventroy stock categories"
                               : activeItem.key === "items"
                                 ? "Manage and track warehouse stocks"
-                                : "Here's what's happening with your inventory today."}
+                                : activeItem.key === "reports"
+                                  ? "Manage and generate inventory metrics"
+                                  : activeItem.key === "reports"
+                                    ? "Manage and generate inventory metrics"
+                                    : "Here's what's happening with your inventory today."}
                 </div>
               </div>
               {/* Page-specific action buttons injected by individual pages */}

@@ -82,11 +82,22 @@ class ItemResponse(ItemBase):
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="before")
-    def extract_names(cls, data: Any):
-        if hasattr(data, "category") and data.category:
-            setattr(data, "category_name", data.category.category_name)
-        if hasattr(data, "supplier") and data.supplier:
-            setattr(data, "supplier_name", data.supplier.supplier_name)
+    @classmethod
+    def extract_names(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if supplier := data.get("supplier"):
+                data["supplier_name"] = getattr(supplier, "supplier_name", data.get("supplier_name", ""))
+            if category := data.get("category"):
+                data["category_name"] = getattr(category, "category_name", data.get("category_name", ""))
+            return data
+
+        category = data.__dict__.get("category") if hasattr(data, "__dict__") else None
+        supplier = data.__dict__.get("supplier") if hasattr(data, "__dict__") else None
+
+        if category:
+            setattr(data, "category_name", category.category_name)
+        if supplier:
+            setattr(data, "supplier_name", supplier.supplier_name)
         return data
 
     @model_validator(mode="after")

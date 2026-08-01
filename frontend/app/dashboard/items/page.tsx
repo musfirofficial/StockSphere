@@ -57,6 +57,10 @@ const inp = (c: any) => ({
   fontFamily: "inherit",
 });
 
+// ============================================================================
+// Helper Components & Sub-Modals
+// ============================================================================
+
 // ── Create Item Modal ──────────────────────────────────────
 interface CreateItemModalProps {
   onClose: () => void;
@@ -115,7 +119,7 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
   };
 
   return (
-    <Modal title="Create New Inventory Item" onClose={onClose} c={c} width={500}>
+    <Modal title="Create New Inventory Item" onClose={onClose} c={c} width={500} closeOnOverlayClick={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {error && (
           <div
@@ -145,7 +149,7 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
               style={inp(c)}
               value={sku}
               onChange={(e) => setSku(e.target.value)}
-              placeholder="e.g. SKU-WR-25"
+              placeholder="e.g. SKU-1234"
             />
           </Field>
         </div>
@@ -311,7 +315,10 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
 
 
 
-// ── Main Page Component ─────────────────────────────────────
+// ============================================================================
+// Main Page Component
+// ============================================================================
+
 export default function ItemsPage() {
   const { mode, c } = useTheme();
   const {
@@ -336,6 +343,9 @@ export default function ItemsPage() {
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "items");
   const isSales = isSalesRole(loggedInUser?.role ?? "");
 
+  // --------------------------------------------------------------------------
+  // State Management
+  // --------------------------------------------------------------------------
   // Selected checkboxes
   const [selected, setSelected] = useState<string[]>([]);
   // Text search filter
@@ -377,6 +387,9 @@ export default function ItemsPage() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // --------------------------------------------------------------------------
+  // Effects & Header Actions
+  // --------------------------------------------------------------------------
   // Set page header actions dynamically — hidden for read-only roles
   useEffect(() => {
     if (readOnly) {
@@ -572,22 +585,45 @@ export default function ItemsPage() {
     const supp = supplierList.find((s) => s.supplierName === form.supplier);
 
     try {
-      const body: any = {
-        item_name: form.itemName,
-        sku: form.sku,
-        description: form.description || null,
-        unit: form.unit,
-        selling_price: Number(form.sellingPrice) || undefined,
-        reorder_level: Number(form.reorderLevel) || undefined,
-        reorder_quantity: Number(form.reorderQuantity) || undefined,
-        is_active: form.active,
-      };
-
-      if (form.costPrice !== null && form.costPrice !== undefined) {
+      const body: any = {};
+      if (form.itemName && form.itemName !== selectedItem?.itemName) {
+        body.item_name = form.itemName;
+      }
+      if (form.sku && form.sku !== selectedItem?.sku) {
+        body.sku = form.sku;
+      }
+      if ((form.description || null) !== (selectedItem?.description || null)) {
+        body.description = form.description || null;
+      }
+      if (form.unit && form.unit !== selectedItem?.unit) {
+        body.unit = form.unit;
+      }
+      if (form.sellingPrice !== undefined && Number(form.sellingPrice) !== Number(selectedItem?.sellingPrice)) {
+        body.selling_price = Number(form.sellingPrice);
+      }
+      if (form.reorderLevel !== undefined && Number(form.reorderLevel) !== Number(selectedItem?.reorderLevel)) {
+        body.reorder_level = Number(form.reorderLevel);
+      }
+      if (form.reorderQuantity !== undefined && Number(form.reorderQuantity) !== Number(selectedItem?.reorderQuantity)) {
+        body.reorder_quantity = Number(form.reorderQuantity);
+      }
+      if (form.costPrice !== undefined && form.costPrice !== null && Number(form.costPrice) !== Number(selectedItem?.costPrice)) {
         body.cost_price = Number(form.costPrice);
       }
-      if (cat) body.category_id = cat.id;
-      if (supp) body.supplier_id = supp.id;
+      if (form.active !== undefined && form.active !== selectedItem?.active) {
+        body.is_active = form.active;
+      }
+      if (cat && form.category !== selectedItem?.category) {
+        body.category_id = cat.id;
+      }
+      if (supp && form.supplier !== selectedItem?.supplier) {
+        body.supplier_id = supp.id;
+      }
+
+      if (Object.keys(body).length === 0) {
+        setIsEditing(false);
+        return;
+      }
 
       const updated = await apiFetch<any>(`/items/${form.id}`, {
         method: "PATCH",
@@ -665,6 +701,9 @@ export default function ItemsPage() {
             overflow: "hidden",
           }}
         >
+          {/* ---------------------------------------------------------------------- */}
+          {/* Toolbar & Search Bar                                                  */}
+          {/* ---------------------------------------------------------------------- */}
           {/* Toolbar */}
           <div
             style={{
@@ -858,116 +897,93 @@ export default function ItemsPage() {
 
               {/* Supplier Filter Dropdown — hidden for Sales (no supplier data) */}
               {!isSales && (
-              <div style={{ position: "relative" }}>
-                <button
-                  onClick={() => {
-                    setSupplierFilterOpen(!supplierFilterOpen);
-                    setCategoryFilterOpen(false);
-                    setSuppSearch("");
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: `1px solid ${selectedSupplier ? c.accent : c.border}`,
-                    background: selectedSupplier ? c.accentSoft : c.surface,
-                    color: selectedSupplier ? c.accent : c.text,
-                    fontSize: 12.5,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  <Filter size={13} />
-                  <span>
-                    {selectedSupplier ? `Supplier: ${selectedSupplier.substring(0, 10)}${selectedSupplier.length > 10 ? "..." : ""}` : "All Suppliers"}
-                  </span>
-                  <ChevronDown size={13} />
-                </button>
+                <div style={{ position: "relative" }}>
+                  <button
+                    onClick={() => {
+                      setSupplierFilterOpen(!supplierFilterOpen);
+                      setCategoryFilterOpen(false);
+                      setSuppSearch("");
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${selectedSupplier ? c.accent : c.border}`,
+                      background: selectedSupplier ? c.accentSoft : c.surface,
+                      color: selectedSupplier ? c.accent : c.text,
+                      fontSize: 12.5,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <Filter size={13} />
+                    <span>
+                      {selectedSupplier ? `Supplier: ${selectedSupplier.substring(0, 10)}${selectedSupplier.length > 10 ? "..." : ""}` : "All Suppliers"}
+                    </span>
+                    <ChevronDown size={13} />
+                  </button>
 
-                {supplierFilterOpen && (
-                  <>
-                    <div
-                      onClick={() => setSupplierFilterOpen(false)}
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 100,
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "calc(100% + 6px)",
-                        right: 0,
-                        width: 220,
-                        background: c.surface,
-                        border: `1px solid ${c.border}`,
-                        borderRadius: 10,
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                        zIndex: 101,
-                        padding: 6,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
+                  {supplierFilterOpen && (
+                    <>
+                      <div
+                        onClick={() => setSupplierFilterOpen(false)}
+                        style={{
+                          position: "fixed",
+                          inset: 0,
+                          zIndex: 100,
+                        }}
+                      />
                       <div
                         style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "6px 8px",
-                          borderRadius: 6,
+                          position: "absolute",
+                          top: "calc(100% + 6px)",
+                          right: 0,
+                          width: 220,
+                          background: c.surface,
                           border: `1px solid ${c.border}`,
-                          background: c.inputBg,
+                          borderRadius: 10,
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                          zIndex: 101,
+                          padding: 6,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
                         }}
                       >
-                        <Search size={12} color={c.textFaint} />
-                        <input
-                          value={suppSearch}
-                          onChange={(e) => setSuppSearch(e.target.value)}
-                          placeholder="Search suppliers..."
+                        <div
                           style={{
-                            border: "none",
-                            outline: "none",
-                            background: "transparent",
-                            color: c.text,
-                            fontSize: 12,
-                            width: "100%",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </div>
-                      <div style={{ maxHeight: 180, overflowY: "auto" }}>
-                        <button
-                          onClick={() => {
-                            setSelectedSupplier(null);
-                            setSupplierFilterOpen(false);
-                            setPage(1);
-                          }}
-                          style={{
-                            width: "100%",
-                            padding: "7px 10px",
-                            textAlign: "left",
-                            fontSize: 12.5,
-                            border: "none",
-                            background: !selectedSupplier ? c.accentSoft : "transparent",
-                            color: !selectedSupplier ? c.accent : c.text,
-                            fontWeight: !selectedSupplier ? 600 : 400,
-                            cursor: "pointer",
-                            borderRadius: 4,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            border: `1px solid ${c.border}`,
+                            background: c.inputBg,
                           }}
                         >
-                          All Suppliers
-                        </button>
-                        {filteredSuppliersForDropdown.map((supp) => (
+                          <Search size={12} color={c.textFaint} />
+                          <input
+                            value={suppSearch}
+                            onChange={(e) => setSuppSearch(e.target.value)}
+                            placeholder="Search suppliers..."
+                            style={{
+                              border: "none",
+                              outline: "none",
+                              background: "transparent",
+                              color: c.text,
+                              fontSize: 12,
+                              width: "100%",
+                              fontFamily: "inherit",
+                            }}
+                          />
+                        </div>
+                        <div style={{ maxHeight: 180, overflowY: "auto" }}>
                           <button
-                            key={supp.id}
                             onClick={() => {
-                              setSelectedSupplier(supp.supplierName);
+                              setSelectedSupplier(null);
                               setSupplierFilterOpen(false);
                               setPage(1);
                             }}
@@ -977,21 +993,44 @@ export default function ItemsPage() {
                               textAlign: "left",
                               fontSize: 12.5,
                               border: "none",
-                              background: selectedSupplier === supp.supplierName ? c.accentSoft : "transparent",
-                              color: selectedSupplier === supp.supplierName ? c.accent : c.text,
-                              fontWeight: selectedSupplier === supp.supplierName ? 600 : 400,
+                              background: !selectedSupplier ? c.accentSoft : "transparent",
+                              color: !selectedSupplier ? c.accent : c.text,
+                              fontWeight: !selectedSupplier ? 600 : 400,
                               cursor: "pointer",
                               borderRadius: 4,
                             }}
                           >
-                            {supp.supplierName}
+                            All Suppliers
                           </button>
-                        ))}
+                          {filteredSuppliersForDropdown.map((supp) => (
+                            <button
+                              key={supp.id}
+                              onClick={() => {
+                                setSelectedSupplier(supp.supplierName);
+                                setSupplierFilterOpen(false);
+                                setPage(1);
+                              }}
+                              style={{
+                                width: "100%",
+                                padding: "7px 10px",
+                                textAlign: "left",
+                                fontSize: 12.5,
+                                border: "none",
+                                background: selectedSupplier === supp.supplierName ? c.accentSoft : "transparent",
+                                color: selectedSupplier === supp.supplierName ? c.accent : c.text,
+                                fontWeight: selectedSupplier === supp.supplierName ? 600 : 400,
+                                cursor: "pointer",
+                                borderRadius: 4,
+                              }}
+                            >
+                              {supp.supplierName}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
-              </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* Text Search Bar */}
@@ -1008,6 +1047,9 @@ export default function ItemsPage() {
             </div>
           </div>
 
+          {/* ---------------------------------------------------------------------- */}
+          {/* Data Table                                                            */}
+          {/* ---------------------------------------------------------------------- */}
           {/* Table */}
           <div style={{ overflowX: "auto", flex: 1 }}>
             <table
@@ -1479,12 +1521,7 @@ export default function ItemsPage() {
                           type="number"
                           style={inp(c)}
                           value={editForm.quantity || 0}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              quantity: parseInt(e.target.value) || 0,
-                            })
-                          }
+                          disabled
                         />
                       </Field>
                       <Field label="Unit" c={c}>

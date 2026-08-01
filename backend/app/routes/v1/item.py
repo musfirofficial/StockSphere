@@ -6,7 +6,7 @@ from app.crud import item as crud_item
 from app.crud import auditlog as crud_auditlog
 from app.routes.dependencies import RoleChecker, verify_uniqueness
 from app.models import Item, User, UserRole
-from app.services.stockalert import create_item_alert
+from app.services.stockalert import create_item_alert, sync_item_update_alert
 import uuid
 
 router = APIRouter(prefix="/items", tags=["items"])
@@ -105,6 +105,10 @@ async def update_existing_item(
             old_selling_price,
             updated_item.selling_price,
         )
+
+    # Re-evaluate stock alert state if reorder_level or quantity_in_stock changed
+    if "reorder_level" in update_data or "quantity_in_stock" in update_data:
+        await sync_item_update_alert(db, updated_item)
 
     return await crud_item.get_item_by_item_id(db, updated_item.item_id)
 

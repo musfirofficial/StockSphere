@@ -263,15 +263,32 @@ export default function ProfilePage() {
 
     try {
       const currentUserId = currentUser.id || (currentUser as any).userId;
+
+      const body: any = {};
+      if (profileForm.fullName.trim() !== (currentUser.fullName || "")) {
+        body.full_name = profileForm.fullName.trim();
+      }
+      if (profileForm.username.trim() !== (currentUser.username || "")) {
+        body.user_name = profileForm.username.trim();
+      }
+      if (profileForm.email.trim() !== (currentUser.email || "")) {
+        body.email = profileForm.email.trim();
+      }
+      if (profileForm.phone.trim() !== (currentUser.phone || "")) {
+        body.phone = profileForm.phone.trim();
+      }
+      if (profileForm.nic.trim() !== (currentUser.nic || "")) {
+        body.nic = profileForm.nic.trim();
+      }
+
+      if (Object.keys(body).length === 0) {
+        setProfileMsg({ type: "success", text: "No changes detected." });
+        return;
+      }
+
       const response = await apiFetch<any>(`/users/${currentUserId}`, {
         method: "PATCH",
-        body: JSON.stringify({
-          full_name: profileForm.fullName.trim(),
-          user_name: profileForm.username.trim(),
-          email: profileForm.email.trim(),
-          phone: profileForm.phone.trim(),
-          nic: profileForm.nic.trim(),
-        }),
+        body: JSON.stringify(body),
       });
 
       const updatedUser: DbUser = {
@@ -468,26 +485,87 @@ export default function ProfilePage() {
 
   return (
     <>
-      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
 
-      <div
-        style={{
-          maxWidth: 760,
-          display: "flex",
-          flexDirection: "column",
-          gap: 20,
-        }}
-      >
+        .profile-wrapper {
+          width: 100%;
+          max-width: 760px;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+
+        .profile-avatar-card {
+          padding: 24px 28px;
+          display: flex;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .profile-card {
+          padding: 28px 28px;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+
+        .profile-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+        }
+
+        .profile-half-col {
+          max-width: calc(50% - 8px);
+          width: 100%;
+        }
+
+        .profile-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+
+        @media (max-width: 640px) {
+          .profile-avatar-card {
+            padding: 18px 16px;
+            gap: 14px;
+          }
+          .profile-card {
+            padding: 20px 16px;
+            gap: 16px;
+          }
+          .profile-row {
+            grid-template-columns: 1fr;
+            gap: 14px;
+          }
+          .profile-half-col {
+            max-width: 100%;
+          }
+          .profile-actions {
+            flex-direction: column-reverse;
+            gap: 10px;
+            width: 100%;
+          }
+          .profile-actions button {
+            width: 100%;
+            justify-content: center;
+          }
+        }
+      `}</style>
+
+      <div className="profile-wrapper">
         {/* ── Avatar / Greeting card ── */}
         <div
+          className="profile-avatar-card"
           style={{
             background: c.surface,
             border: `1px solid ${c.border}`,
             borderRadius: 14,
-            padding: "24px 28px",
-            display: "flex",
-            alignItems: "center",
-            gap: 20,
           }}
         >
           <div
@@ -544,7 +622,7 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Personal Details Card ── */}
-        <div style={cardStyle}>
+        <div className="profile-card" style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 14 }}>
           <div style={sectionHeadStyle}>
             <div
               style={{
@@ -569,7 +647,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <div style={rowStyle}>
+          <div className="profile-row">
             <div>
               <FieldLabel label="Full Name" c={c} />
               <InputField
@@ -592,7 +670,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <div style={rowStyle}>
+          <div className="profile-row">
             <div>
               <FieldLabel label="Email Address" c={c} />
               <InputField
@@ -617,7 +695,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <div style={{ maxWidth: "calc(50% - 8px)" }}>
+          <div className="profile-half-col">
             <FieldLabel label="NIC Number" c={c} />
             <InputField
               value={profileForm.nic}
@@ -629,7 +707,7 @@ export default function ProfilePage() {
           </div>
 
           {/* Non-editable fields */}
-          <div style={rowStyle}>
+          <div className="profile-row">
             <div>
               <FieldLabel label="Role" c={c} />
               <InputField value={currentUser.role} c={c} disabled />
@@ -648,7 +726,7 @@ export default function ProfilePage() {
             <Toast type={profileMsg.type} message={profileMsg.text} c={c} />
           )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <div className="profile-actions">
             <button
               onClick={() => {
                 setProfileForm({
@@ -686,7 +764,7 @@ export default function ProfilePage() {
         </div>
 
         {/* ── Password Change Card ── */}
-        <div style={cardStyle}>
+        <div className="profile-card" style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 14 }}>
           <div style={sectionHeadStyle}>
             <div
               style={{
@@ -724,7 +802,7 @@ export default function ProfilePage() {
             />
           </div>
 
-          <div style={rowStyle}>
+          <div className="profile-row">
             <div>
               <FieldLabel label="New Password" c={c} />
               <InputField
@@ -808,7 +886,7 @@ export default function ProfilePage() {
             <Toast type={passwordMsg.type} message={passwordMsg.text} c={c} />
           )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div className="profile-actions">
             <button onClick={handleChangePassword} style={saveBtnStyle(false)}>
               <Lock size={14} />
               Update Password

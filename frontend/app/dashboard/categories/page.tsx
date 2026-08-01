@@ -18,6 +18,10 @@ import { apiFetch } from "@/lib/api";
 import { Checkbox as Cb, Modal, SearchBar, Pagination, ConfirmDeleteModal } from "@/components/ui";
 import { isReadOnly } from "@/lib/roles";
 
+// ============================================================================
+// Types & Interfaces
+// ============================================================================
+
 export interface Category {
   category_id: string;
   category_name: string;
@@ -63,6 +67,10 @@ const inp = (c: any) => ({
   fontFamily: "inherit",
 });
 
+// ============================================================================
+// Helper Components & Sub-Modals
+// ============================================================================
+
 // ── Category Modal (Create / Edit) ──────────────────────────────────
 interface CategoryModalProps {
   initialData?: Category | null;
@@ -99,6 +107,7 @@ function CategoryModal({ initialData, onClose, onSave, c }: CategoryModalProps) 
       onClose={onClose}
       c={c}
       width={440}
+      closeOnOverlayClick={false}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {error && (
@@ -181,7 +190,10 @@ function CategoryModal({ initialData, onClose, onSave, c }: CategoryModalProps) 
 
 
 
-// ── Main Page Component ─────────────────────────────────────
+// ============================================================================
+// Main Page Component
+// ============================================================================
+
 export default function CategoriesPage() {
   const { c } = useTheme();
   const { setHeaderActions, loggedInUser, refreshCategories } = useData();
@@ -189,6 +201,9 @@ export default function CategoriesPage() {
   // Derive read-only mode from role
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "categories");
 
+  // --------------------------------------------------------------------------
+  // State Management
+  // --------------------------------------------------------------------------
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -204,6 +219,9 @@ export default function CategoriesPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 8;
 
+  // --------------------------------------------------------------------------
+  // Effects & Header Actions
+  // --------------------------------------------------------------------------
   // Header button — hidden for read-only roles
   useEffect(() => {
     if (readOnly) {
@@ -234,6 +252,9 @@ export default function CategoriesPage() {
     return () => setHeaderActions(null);
   }, [c, setHeaderActions, readOnly]);
 
+  // --------------------------------------------------------------------------
+  // Handlers & API Actions
+  // --------------------------------------------------------------------------
   // Fetch categories from backend
   const loadCategories = async () => {
     setLoading(true);
@@ -287,6 +308,9 @@ export default function CategoriesPage() {
     }
   };
 
+  // --------------------------------------------------------------------------
+  // Filter & Pagination Calculations
+  // --------------------------------------------------------------------------
   // Filter categories
   const filteredCategories = useMemo(() => {
     const q = categorySearch.toLowerCase().trim();
@@ -334,6 +358,9 @@ export default function CategoriesPage() {
 
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
 
+  // ==========================================================================
+  // Render / JSX Structure
+  // ==========================================================================
   return (
     <div style={{ position: "relative", height: "100%", width: "100%" }}>
       <div
@@ -359,7 +386,9 @@ export default function CategoriesPage() {
             overflow: "hidden",
           }}
         >
-          {/* Toolbar */}
+          {/* ---------------------------------------------------------------------- */}
+          {/* Toolbar & Search Bar                                                  */}
+          {/* ---------------------------------------------------------------------- */}
           <div
             style={{
               display: "flex",
@@ -368,18 +397,11 @@ export default function CategoriesPage() {
               padding: "13px 20px",
               borderBottom: `1px solid ${c.border}`,
               flexWrap: "wrap",
-              gap: 10,
+              gap: 12,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                flex: 1,
-                minWidth: 250,
-              }}
-            >
+            {/* Selection indicators */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Cb checked={allPageSelected} onChange={toggleAllPage} c={c} />
                 <span
@@ -410,7 +432,19 @@ export default function CategoriesPage() {
                   Deselect all
                 </button>
               )}
-              {/* Search bar */}
+            </div>
+
+            {/* Search */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                flex: 1,
+                justifyContent: "flex-end",
+              }}
+            >
               <SearchBar
                 value={categorySearch}
                 onChange={(val) => {
@@ -439,7 +473,9 @@ export default function CategoriesPage() {
             </div>
           )}
 
-          {/* Table */}
+          {/* ---------------------------------------------------------------------- */}
+          {/* Data Table                                                            */}
+          {/* ---------------------------------------------------------------------- */}
           <div style={{ overflowX: "auto", flex: 1 }}>
             <table
               style={{
@@ -596,7 +632,9 @@ export default function CategoriesPage() {
             </table>
           </div>
 
-          {/* Pagination Bar */}
+          {/* ---------------------------------------------------------------------- */}
+          {/* Pagination Footer                                                     */}
+          {/* ---------------------------------------------------------------------- */}
           <Pagination
             page={page}
             totalPages={totalPages}
@@ -609,6 +647,9 @@ export default function CategoriesPage() {
         </div>
       </div>
 
+      {/* ---------------------------------------------------------------------- */}
+      {/* Modals & Dialogs                                                         */}
+      {/* ---------------------------------------------------------------------- */}
       {/* Add Category Modal */}
       {isAddModalOpen && (
         <CategoryModal

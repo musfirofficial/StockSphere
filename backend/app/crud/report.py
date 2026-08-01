@@ -413,3 +413,61 @@ async def get_stock_alert_report_data(
         chart_data=chart_points,
         supplier_breakdown=supplier_breakdown,
     )
+
+
+# ---------------------------- Category Wise Report --------------------------- #
+async def get_category_report_data(db: AsyncSession) -> report_schemas.CategoryReportData:
+    from app.models import Category
+
+    # Total quantity in stock across all items to compute physical space % (proportion of stock volume/qty)
+    total_qty_stmt = select(func.sum(Item.quantity_in_stock))
+    total_qty_res = await db.execute(total_qty_stmt)
+    overall_total_qty = total_qty_res.scalar() or 0
+
+    # Query metrics grouped by Category
+    stmt = (
+        select(
+            Category.category_id,
+            Category.category_name,
+            func.sum(Item.quantity_in_stock * Item.selling_price).label("stock_val"),
+            func.sum(Item.quantity_in_stock * Item.cost_price).label("cost_val"),
+            func.sum(Item.quantity_in_stock).label("cat_qty"),
+        )
+        .join(Item, Category.category_id == Item.category_id)
+        .where(Item.is_active == True)
+        .group_by(Category.category_id, Category.category_name)
+        .order_by(literal_column("stock_val").desc())
+    )
+
+    res = await db.execute(stmt)
+    rows = res.fetchall()
+
+    metrics = []
+    for r in rows:
+        stock_val = r.stock_val or Decimal("0.00")
+        cost_val = r.cost_val or Decimal("0.00")
+        cat_qty = r.cat_qty or 0
+
+        # Margin % = ((Selling Value - Cost Value) / Selling Value) * 100
+        if stock_val > 0:
+            margin_pct = float(((stock_val - cost_val) / stock_val) * 100)
+        else:
+            margin_pct = 0.0
+
+        # Space Used % = (Category Total Quantity / Overall Total Quantity) * 100
+        if overall_total_qty > 0:
+            space_pct = float((cat_qty / overall_total_qty) * 100)
+        else:
+            space_pct = 0.0
+
+        metrics.append(
+            report_schemas.CategoryReportMetric(
+                category_id=r.category_id,
+                category_name=r.category_name,
+                stock_value=stock_val,
+                margin_percentage=round(margin_pct, 1),
+                space_used_percentage=round(space_pct, 1),
+            )
+        )
+
+    return report_schemas.CategoryReportData(categories=metrics)

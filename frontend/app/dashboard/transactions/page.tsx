@@ -18,7 +18,8 @@ import {
   getItemCurrentQty,
 } from "../DataContext";
 import { isReadOnly } from "@/lib/roles";
-import { Pagination, SearchBar } from "@/components/ui";
+import { Pagination, SearchBar, DataTable, DataTableColumn } from "@/components/ui";
+
 
 type BulkRow = { item: string; type: "Stock in" | "Stock out"; qty: number };
 
@@ -188,184 +189,83 @@ export default function TransactionsPage() {
             height: "100%",
           }}
         >
-          {/* Search bar */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 14,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "8px 12px",
-                borderRadius: 9,
-                border: `1px solid ${c.border}`,
-                background: c.surface,
-                flex: 1,
-                maxWidth: 320,
-              }}
-            >
-              <Search size={14} color={c.textFaint} />
-              <input
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-                placeholder="Search by item, user or ID…"
-                style={{
-                  border: "none",
-                  outline: "none",
-                  background: "transparent",
-                  color: c.text,
-                  fontSize: 13,
-                  fontFamily: "inherit",
-                  width: "100%",
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Card */}
-          <div
-            style={{
-              background: c.surface,
-              border: `1px solid ${c.border}`,
-              borderRadius: 14,
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-              flex: 1,
-            }}
-          >
-            <div style={{ overflowX: "auto", flex: 1 }}>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 13,
-                }}
-              >
-                <thead>
-                  <tr
+          <DataTable
+            c={c}
+            columns={[
+              {
+                key: "item",
+                header: "Item",
+                render: (t) => <span style={{ fontWeight: 600 }}>{t.item}</span>,
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (t) => {
+                  const { bg, fg } = typeBadge(t.type);
+                  return (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        padding: "3px 9px",
+                        borderRadius: 999,
+                        background: bg,
+                        color: fg,
+                      }}
+                    >
+                      {t.type}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "qty",
+                header: "Quantity",
+                render: (t) => (
+                  <span
                     style={{
-                      color: c.textFaint,
-                      textAlign: "left",
-                      background: c.surfaceMuted,
+                      fontWeight: 600,
+                      color: t.qty >= 0 ? c.accent : c.danger,
                     }}
                   >
-                    {["Item", "Type", "Quantity", "User", "Date"].map((h) => (
-                      <th
-                        key={h}
-                        style={{
-                          padding: "11px 20px",
-                          fontWeight: 500,
-                          fontSize: 11.5,
-                          borderBottom: `1px solid ${c.border}`,
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        style={{
-                          padding: "32px 20px",
-                          textAlign: "center",
-                          color: c.textFaint,
-                        }}
-                      >
-                        No transactions found.
-                      </td>
-                    </tr>
-                  ) : (
-                    pageRows.map((t) => {
-                      const { bg, fg } = typeBadge(t.type);
-                      const sel = selectedTx?.id === t.id;
-                      return (
-                        <tr
-                          key={t.id}
-                          onClick={() => setSelectedTx(t)}
-                          style={{
-                            borderTop: `1px solid ${c.border}`,
-                            background: sel ? c.accentSoft : "transparent",
-                            cursor: "pointer",
-                            transition: "background .12s",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!sel)
-                              e.currentTarget.style.background = c.surfaceMuted;
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!sel)
-                              e.currentTarget.style.background = "transparent";
-                          }}
-                        >
-                          <td style={{ padding: "11px 20px", fontWeight: 600 }}>
-                            {t.item}
-                          </td>
-                          <td style={{ padding: "11px 20px" }}>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                padding: "3px 9px",
-                                borderRadius: 999,
-                                background: bg,
-                                color: fg,
-                              }}
-                            >
-                              {t.type}
-                            </span>
-                          </td>
-                          <td
-                            style={{
-                              padding: "11px 20px",
-                              fontWeight: 600,
-                              color: t.qty >= 0 ? c.accent : c.danger,
-                            }}
-                          >
-                            {t.qty > 0 ? `+${t.qty}` : t.qty}
-                          </td>
-                          <td
-                            style={{ padding: "11px 20px", color: c.textMuted }}
-                          >
-                            {t.user}
-                          </td>
-                          <td
-                            style={{ padding: "11px 20px", color: c.textFaint }}
-                          >
-                            {t.date}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            <Pagination
-              page={page}
-              totalPages={totalPages}
-              totalCount={filtered.length}
-              pageSize={PAGE}
-              itemLabel="transactions"
-              onPageChange={setPage}
-              c={c}
-            />
-          </div>
+                    {t.qty > 0 ? `+${t.qty}` : t.qty}
+                  </span>
+                ),
+              },
+              {
+                key: "user",
+                header: "User",
+                render: (t) => <span style={{ color: c.textMuted }}>{t.user}</span>,
+              },
+              {
+                key: "date",
+                header: "Date",
+                render: (t) => <span style={{ color: c.textFaint }}>{t.date}</span>,
+              },
+            ]}
+            data={pageRows}
+            keyExtractor={(t) => t.id}
+            selectedRowId={selectedTx?.id}
+            onRowClick={(t) => setSelectedTx(t)}
+            emptyMessage="No transactions found."
+            search={{
+              value: search,
+              onChange: (val) => {
+                setSearch(val);
+                setPage(1);
+              },
+              placeholder: "Search by item, user or ID…",
+              maxWidth: 280,
+            }}
+            pagination={{
+              page,
+              totalPages,
+              totalCount: filtered.length,
+              pageSize: PAGE,
+              itemLabel: "transactions",
+              onPageChange: setPage,
+            }}
+          />
         </div>
 
         {/* Detail panel */}

@@ -13,7 +13,8 @@ async def create_item(db: AsyncSession, item_in: ItemCreate) -> Item:
     db.add(new_item)
     await db.commit()
     await db.refresh(new_item)
-    return new_item
+    created = await get_item_by_item_id(db, new_item.item_id)
+    return created or new_item
 
 
 # -------------------------- crud for get all items -------------------------- #
@@ -35,11 +36,11 @@ async def update_item(db: AsyncSession, db_item: Item, update_data: dict):
     try:
         await db.commit()
         await db.refresh(db_item)
+        updated = await get_item_by_item_id(db, db_item.item_id)
+        return updated or db_item
     except Exception as e:
         await db.rollback()
         raise e
-
-    return db_item
 
 
 # ----------------------------- Delete Item crud ----------------------------- #

@@ -64,3 +64,38 @@ async def create_item_alert(db: AsyncSession, item: Item):
         return await crud_stockalert.create_stockalert(
             db, item.item_id, item.supplier_id, AlertStatus.LOW_STOCK
         )
+
+
+async def sync_item_update_alert(db: AsyncSession, item: Item) -> StockAlert | None:
+    """
+    Re-evaluate and update stock alert status when an item's reorder_level
+    or quantity is updated manually.
+    """
+    active = await crud_stockalert.get_item_alert(db, item)
+    current_stock = item.quantity_in_stock
+    reorder = item.reorder_level
+
+    if current_stock >= reorder:
+        if active:
+            alert = await crud_stockalert.update_alert_status(
+                db, active, AlertStatus.RESOLVED
+            )
+            await db.commit()
+            return alert
+        return None
+
+    target = AlertStatus.CRITICAL if current_stock == 0 else AlertStatus.LOW_STOCK
+
+    if active:
+        if active.status != target:
+            alert = await crud_stockalert.update_alert_status(db, active, target)
+            await db.commit()
+            return alert
+        return active
+    else:
+        alert = await crud_stockalert.create_stockalert(
+            db, item.item_id, item.supplier_id, target
+        )
+        await db.commit()
+        return alert
+
