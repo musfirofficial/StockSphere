@@ -1,3 +1,6 @@
+import os
+
+from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
@@ -10,6 +13,9 @@ from app.models import User, UserRole
 import uuid
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+load_dotenv()
+RECOVARY_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 
 
 # -------------------- New user create endpoint (Admin Only) -------------------- #
@@ -79,12 +85,12 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Guard: super admin account is immutable — no one can update it, not even itself
-    if target_user.user_name == "adminhomerex":
+    if target_user.user_name == RECOVARY_ADMIN_USERNAME:
         raise HTTPException(
             status_code=403, detail="Super admin account cannot be modified"
         )
 
-    is_super_admin = current_user.user_name == "adminhomerex"
+    is_super_admin = current_user.user_name == RECOVARY_ADMIN_USERNAME
     is_admin = current_user.role == UserRole.ADMIN
     is_self = current_user.user_id == target_user.user_id
 
@@ -152,7 +158,7 @@ async def change_user_password(
     ),
 ):
     # variables
-    is_super_admin = current_user.user_name == "adminhomerex"
+    is_super_admin = current_user.user_name == RECOVARY_ADMIN_USERNAME
     is_admin = current_user.role == UserRole.ADMIN and not is_super_admin
     is_self = current_user.user_id == user_id
 
@@ -239,14 +245,14 @@ async def delete_existing_user(
         )
 
     # 3. Prevent ANYONE from deleting the hardcoded admin
-    if target_user.user_name == "adminhomerex":
+    if target_user.user_name == RECOVARY_ADMIN_USERNAME:
         raise HTTPException(
             status_code=403,
             detail="The system recovery admin account cannot be deleted",
         )
 
     # 4. Enforce role restrictions for regular administrators
-    if current_user.user_name != "adminhomerex":
+    if current_user.user_name != RECOVARY_ADMIN_USERNAME:
         # Regular admins cannot delete other admins
         if target_user.role == UserRole.ADMIN:
             raise HTTPException(

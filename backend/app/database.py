@@ -38,17 +38,3 @@ async def create_db_and_tables():
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
         yield session
-
-
-"""
-DROP DATABASE stocksphere;
-REASSIGN OWNED BY homerex TO postgres;
-DROP OWNED BY homerex;
-DROP USER homerex;
-
-CREATE USER homerex WITH PASSWORD 'mustha';
-CREATE DATABASE stocksphere OWNER homerex;
-GRANT ALL PRIVILEGES ON DATABASE stocksphere TO homerex;
-
-pw : mustha
-"""
