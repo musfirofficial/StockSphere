@@ -1,0 +1,2998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inventory Management System — ERP Prototype</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <style>
+    /* -------------------------------------------------------------
+       0. DESIGN SYSTEM FOUNDATION
+    ------------------------------------------------------------- */
+    :root {
+      --color-bg: #FAFAF9;
+      --color-surface: #FFFFFF;
+      --color-border: #E4E4E1;
+      --color-border-strong: #D3D2CD;
+      --color-text-primary: #1C1B19;
+      --color-text-secondary: #706E68;
+      --color-text-disabled: #B5B3AC;
+      --color-accent: #3B5BFD;
+      --color-accent-hover: #3049D6;
+      --color-accent-soft: #EEF1FF;
+      --color-row-alt: #F5F5F3;
+      --color-success: #1F8A5F;
+      --color-warning: #B4740E;
+      --color-danger: #C0392B;
+      --color-overlay: rgba(28, 27, 25, 0.45);
+      
+      --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'IBM Plex Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      border-radius: 0 !important; /* HARD RULE: Strict sharp corners everywhere */
+    }
+
+    body {
+      font-family: var(--font-ui);
+      background-color: var(--color-bg);
+      color: var(--color-text-primary);
+      font-size: 14px;
+      line-height: 1.4;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    .font-mono {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--color-bg);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--color-border-strong);
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--color-text-secondary);
+    }
+
+    /* Helper Utilities */
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .justify-end { justify-content: flex-end; }
+    .gap-1 { gap: 4px; }
+    .gap-2 { gap: 8px; }
+    .gap-3 { gap: 12px; }
+    .gap-4 { gap: 16px; }
+    .gap-6 { gap: 24px; }
+    .w-full { width: 100%; }
+    .h-full { height: 100%; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .text-muted { color: var(--color-text-secondary); }
+    .text-xs { font-size: 11px; }
+    .text-sm { font-size: 12px; }
+    .text-base { font-size: 14px; }
+    .text-lg { font-size: 16px; }
+    .text-xl { font-size: 20px; }
+    .text-2xl { font-size: 26px; font-weight: 600; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .uppercase-eyebrow {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--color-text-secondary);
+      font-weight: 600;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-text-primary);
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .btn-sm {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    .btn-lg {
+      padding: 12px 20px;
+      font-size: 14px;
+    }
+    .btn-primary {
+      background: var(--color-accent);
+      color: #FFFFFF;
+      border-color: var(--color-accent);
+    }
+    .btn-primary:hover {
+      background: var(--color-accent-hover);
+      border-color: var(--color-accent-hover);
+    }
+    .btn-secondary {
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      border-color: var(--color-border-strong);
+    }
+    .btn-secondary:hover {
+      background: var(--color-bg);
+      border-color: var(--color-text-primary);
+    }
+    .btn-destructive {
+      background: var(--color-surface);
+      color: var(--color-danger);
+      border-color: #F5C6CB;
+    }
+    .btn-destructive:hover {
+      background: #FDEDEC;
+      border-color: var(--color-danger);
+    }
+    .btn-icon {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+    }
+    .btn-icon:hover {
+      border-color: var(--color-border-strong);
+      background: var(--color-bg);
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Inputs & Selects */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .form-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--color-text-primary);
+    }
+    .form-control {
+      width: 100%;
+      height: 34px;
+      padding: 6px 10px;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      border: 1px solid var(--color-border);
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .form-control:focus {
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 1px var(--color-accent);
+    }
+    textarea.form-control {
+      height: auto;
+      min-height: 70px;
+      resize: vertical;
+    }
+    .form-select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%20706E68' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      padding-right: 28px;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border-strong);
+      color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .badge-success {
+      border-color: var(--color-success);
+      color: var(--color-success);
+      background: #F0FDF4;
+    }
+    .badge-warning {
+      border-color: var(--color-warning);
+      color: var(--color-warning);
+      background: #FFFBEB;
+    }
+    .badge-danger {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+      background: #FEF2F2;
+    }
+    .badge-accent {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+      background: var(--color-accent-soft);
+    }
+
+    /* Cards & Containers */
+    .card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      box-shadow: 0 1px 2px rgba(28,27,25,0.04);
+      padding: 16px;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    /* Data Table */
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    table.data-table th {
+      background: var(--color-bg);
+      border-bottom: 1px solid var(--color-border-strong);
+      padding: 8px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--color-text-secondary);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    table.data-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--color-border);
+      color: var(--color-text-primary);
+      vertical-align: middle;
+    }
+    table.data-table tr:nth-child(even) td {
+      background-color: var(--color-row-alt);
+    }
+    table.data-table tr:hover td {
+      background-color: var(--color-accent-soft);
+    }
+
+    /* -------------------------------------------------------------
+       1. APPLICATION SHELL
+    ------------------------------------------------------------- */
+    #app-container {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* Top Bar */
+    #top-bar {
+      height: 56px;
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+    .brand-mark {
+      width: 24px;
+      height: 24px;
+      background: var(--color-accent);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    
+    .search-box {
+      position: relative;
+      width: 340px;
+    }
+    .search-box input {
+      padding-left: 32px;
+      padding-right: 36px;
+    }
+    .search-box .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--color-text-secondary);
+      pointer-events: none;
+    }
+    .search-box .kbd-hint {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 10px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      padding: 1px 4px;
+      color: var(--color-text-secondary);
+      pointer-events: none;
+    }
+
+    /* Role Quick Switcher in Header */
+    .role-switcher-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border-strong);
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    /* Main Layout (Sidebar + Content) */
+    #main-layout {
+      display: flex;
+      flex: 1;
+    }
+
+    #sidebar {
+      width: 240px;
+      background: var(--color-surface);
+      border-right: 1px solid var(--color-border);
+      display: flex;
+      flex-direction: column;
+      transition: width 0.2s ease;
+      user-select: none;
+    }
+    #sidebar.collapsed {
+      width: 64px;
+    }
+    #sidebar.collapsed .nav-group-title,
+    #sidebar.collapsed .nav-item-label,
+    #sidebar.collapsed .role-tag {
+      display: none;
+    }
+
+    .nav-section {
+      padding: 12px 8px 4px 8px;
+    }
+    .nav-group-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-secondary);
+      padding: 4px 8px;
+      margin-top: 8px;
+      font-weight: 700;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: var(--color-text-primary);
+      text-decoration: none;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      margin-bottom: 2px;
+    }
+    .nav-item:hover {
+      background: var(--color-bg);
+    }
+    .nav-item.active {
+      background: var(--color-accent-soft);
+      border-left-color: var(--color-accent);
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+
+    #content-area {
+      flex: 1;
+      padding: 24px;
+      max-width: 1600px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .breadcrumb-trail {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      margin-bottom: 8px;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    /* -------------------------------------------------------------
+       2. AUTHENTICATION (LOGIN OVERLAY)
+    ------------------------------------------------------------- */
+    #login-page {
+      position: fixed;
+      inset: 0;
+      background: var(--color-bg);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    .login-card {
+      width: 380px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      padding: 32px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    /* -------------------------------------------------------------
+       MODALS AND DRAWERS
+    ------------------------------------------------------------- */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: var(--color-overlay);
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-box {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border-strong);
+      width: 100%;
+      max-width: 600px;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--color-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: var(--color-bg);
+    }
+
+    /* Right Drawer */
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: var(--color-overlay);
+      z-index: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .drawer-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .drawer-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 580px;
+      background: var(--color-surface);
+      border-left: 1px solid var(--color-border-strong);
+      z-index: 501;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      box-shadow: -4px 0 16px rgba(0,0,0,0.08);
+    }
+    .drawer-backdrop.open .drawer-panel {
+      transform: translateX(0);
+    }
+
+    /* Toast Notification */
+    #toast-container {
+      position: fixed;
+      top: 68px;
+      right: 20px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toast {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border-strong);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 280px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      animation: slideIn 0.2s ease;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Dashboard Widgets Grid */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 1300px) {
+      .summary-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 768px) {
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .stat-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      padding: 14px;
+    }
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 4px;
+      margin-bottom: 2px;
+      font-family: var(--font-mono);
+    }
+
+    /* Tab navigation */
+    .tabs-header {
+      display: flex;
+      border-bottom: 1px solid var(--color-border);
+      margin-bottom: 16px;
+      gap: 16px;
+    }
+    .tab-btn {
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--color-text-secondary);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      background: none;
+      border-top: none; border-left: none; border-right: none;
+    }
+    .tab-btn:hover {
+      color: var(--color-text-primary);
+    }
+    .tab-btn.active {
+      color: var(--color-accent);
+      border-bottom-color: var(--color-accent);
+      font-weight: 600;
+    }
+
+    /* Workflow Stepper Bar */
+    .stepper {
+      display: flex;
+      align-items: center;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      padding: 8px 16px;
+      margin-bottom: 16px;
+      gap: 12px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+    }
+    .step-item.active {
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+    .step-item.completed {
+      color: var(--color-success);
+      font-weight: 500;
+    }
+
+    /* POS Screen Specifics */
+    .pos-container {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 16px;
+      height: calc(100vh - 104px);
+    }
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+      overflow-y: auto;
+      max-height: calc(100vh - 200px);
+    }
+    .product-tile {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      padding: 10px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color 0.15s ease;
+    }
+    .product-tile:hover {
+      border-color: var(--color-accent);
+    }
+  </style>
+</head>
+<body>
+
+<div id="app-container">
+
+  <!-- -------------------------------------------------------------
+       AUTHENTICATION OVERLAY (LOGIN PAGE)
+  ------------------------------------------------------------- -->
+  <div id="login-page">
+    <div class="login-card">
+      <div class="flex items-center gap-2 mb-4" style="margin-bottom: 24px;">
+        <div class="brand-mark" style="width: 32px; height: 32px; font-size: 16px;">I</div>
+        <span style="font-size: 18px; font-weight: 700;">INVENTORY ERP</span>
+      </div>
+      <h2 class="text-xl font-semibold mb-1" style="margin-bottom: 4px;">Internal Employee Sign In</h2>
+      <p class="text-sm text-muted mb-4" style="margin-bottom: 20px;">Access your operational workspace</p>
+
+      <div class="form-group">
+        <label class="form-label">Username / Email</label>
+        <input type="text" id="login-username" class="form-control" value="admin@company.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" id="login-password" class="form-control" value="••••••••">
+      </div>
+
+      <div class="flex items-center justify-between mb-4" style="margin-bottom: 20px; font-size: 12px;">
+        <label class="flex items-center gap-2" style="cursor: pointer;">
+          <input type="checkbox" checked> Keep me signed in
+        </label>
+        <a href="#" class="text-muted" onclick="alert('Password reset request dispatched to System Administrator.'); return false;">Forgot password?</a>
+      </div>
+
+      <button class="btn btn-primary w-full" style="padding: 10px;" onclick="App.login()">
+        <i data-lucide="log-in" style="width: 16px; height: 16px;"></i> Sign In
+      </button>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border);">
+        <p class="text-xs uppercase-eyebrow mb-2" style="margin-bottom: 8px;">Quick Prototype Role Switch:</p>
+        <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <button class="btn btn-secondary btn-sm" onclick="App.switchRole('Admin'); App.login();">👑 Admin</button>
+          <button class="btn btn-secondary btn-sm" onclick="App.switchRole('Manager'); App.login();">💼 Manager</button>
+          <button class="btn btn-secondary btn-sm" onclick="App.switchRole('Warehouse Staff'); App.login();">📦 Warehouse</button>
+          <button class="btn btn-secondary btn-sm" onclick="App.switchRole('Cashier'); App.login();">🛒 Cashier</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- -------------------------------------------------------------
+       APPLICATION SHELL: TOP BAR
+  ------------------------------------------------------------- -->
+  <header id="top-bar">
+    <div class="flex items-center gap-4">
+      <button class="btn btn-icon" id="sidebar-toggle" onclick="App.toggleSidebar()" title="Toggle Sidebar Navigation">
+        <i data-lucide="menu" style="width: 16px; height: 16px;"></i>
+      </button>
+      <div class="brand-logo">
+        <div class="brand-mark">I</div>
+        <span>INVENTORY ERP</span>
+      </div>
+    </div>
+
+    <!-- Omnisearch -->
+    <div class="search-box">
+      <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
+      <input type="text" id="global-search-input" class="form-control" placeholder="Search products, SKUs, POs, suppliers..." onkeyup="App.handleGlobalSearch(this.value)">
+      <span class="kbd-hint">/</span>
+    </div>
+
+    <!-- Role Context Switcher & User Profile -->
+    <div class="flex items-center gap-3">
+      <!-- Role selector dropdown for live testing -->
+      <div class="role-switcher-badge">
+        <span class="text-xs text-muted">Role:</span>
+        <select id="header-role-select" class="form-control form-select" style="height: 26px; padding: 2px 20px 2px 6px; font-size: 11px; font-weight: 600; border: none; background-color: transparent;" onchange="App.switchRole(this.value)">
+          <option value="Admin">Admin</option>
+          <option value="Manager">Manager</option>
+          <option value="Warehouse Staff">Warehouse Staff</option>
+          <option value="Cashier">Cashier</option>
+        </select>
+      </div>
+
+      <!-- Notifications Bell -->
+      <button class="btn btn-icon" style="position: relative;" onclick="App.openNotificationsDrawer()" title="Notifications">
+        <i data-lucide="bell" style="width: 16px; height: 16px;"></i>
+        <span id="notif-badge-count" class="badge badge-danger" style="position: absolute; top: -4px; right: -4px; padding: 1px 4px; font-size: 9px;">3</span>
+      </button>
+
+      <!-- User Menu -->
+      <div class="flex items-center gap-2" style="border-left: 1px solid var(--color-border); padding-left: 12px;">
+        <div style="width: 28px; height: 28px; background: var(--color-text-primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px;" id="user-avatar-initials">
+          JP
+        </div>
+        <div class="flex flex-col">
+          <span class="font-medium text-xs" id="user-display-name">J. Perera</span>
+          <span class="text-xs text-muted" id="user-display-role">Admin</span>
+        </div>
+        <button class="btn btn-icon btn-sm" style="border: none;" onclick="App.logout()" title="Sign Out">
+          <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- -------------------------------------------------------------
+       MAIN LAYOUT: SIDEBAR + CONTENT
+  ------------------------------------------------------------- -->
+  <div id="main-layout">
+    
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <div class="nav-section flex-1" id="sidebar-nav-container">
+        <!-- Dynamically rendered based on RBAC permissions -->
+      </div>
+      
+      <!-- Bottom Collapse Bar -->
+      <div style="padding: 12px; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end;">
+        <button class="btn btn-icon btn-sm" onclick="App.toggleSidebar()">
+          <i data-lucide="chevrons-left" id="collapse-icon" style="width: 16px; height: 16px;"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- CONTENT AREA -->
+    <main id="content-area">
+      <!-- Dynamic views injected here by App.navigate() -->
+    </main>
+  </div>
+
+</div>
+
+<!-- -------------------------------------------------------------
+     DRAWERS & MODAL CONTAINERS
+------------------------------------------------------------- -->
+<!-- Drawer Container -->
+<div class="drawer-backdrop" id="global-drawer-backdrop" onclick="App.closeDrawer(event)">
+  <div class="drawer-panel" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="text-base font-semibold" id="drawer-title">Drawer Panel</h3>
+      <button class="btn btn-icon btn-sm" onclick="App.closeDrawer()"><i data-lucide="x" style="width: 16px; height: 16px;"></i></button>
+    </div>
+    <div class="modal-body" id="drawer-body">
+      <!-- Drawer Content -->
+    </div>
+  </div>
+</div>
+
+<!-- Modal Container -->
+<div class="modal-backdrop" id="global-modal-backdrop" onclick="App.closeModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 class="text-base font-semibold" id="modal-title">Modal Header</h3>
+      <button class="btn btn-icon btn-sm" onclick="App.closeModal()"><i data-lucide="x" style="width: 16px; height: 16px;"></i></button>
+    </div>
+    <div class="modal-body" id="modal-body">
+      <!-- Modal Content -->
+    </div>
+    <div class="modal-footer" id="modal-footer">
+      <button class="btn btn-secondary" onclick="App.closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- -------------------------------------------------------------
+     APPLICATION LOGIC & STATE STORE (JAVASCRIPT)
+------------------------------------------------------------- -->
+<script>
+/**
+ * INVENTORY MANAGEMENT SYSTEM - STATE STORE & ROUTER
+ */
+const App = {
+  // Current session state
+  currentUser: {
+    name: 'J. Perera',
+    email: 'j.perera@company.com',
+    role: 'Admin', // Admin, Manager, Warehouse Staff, Cashier
+    warehouseId: 'WH-1'
+  },
+  
+  activeRoute: 'dashboard',
+  sidebarCollapsed: false,
+
+  // -------------------------------------------------------------
+  // MOCK DATABASE DATASETS
+  // -------------------------------------------------------------
+  db: {
+    warehouses: [
+      { id: 'WH-1', name: 'Main Warehouse', location: 'Central Industrial Zone, Bay 4', skus: 142, totalValue: 4850000, status: 'Active' },
+      { id: 'WH-2', name: 'Branch Warehouse', location: 'East Hub Terminal', skus: 89, totalValue: 1920000, status: 'Active' }
+    ],
+
+    categories: [
+      { id: 'CAT-1', name: 'Electronics', count: 18 },
+      { id: 'CAT-2', name: 'Cables & Adapters', count: 24 },
+      { id: 'CAT-3', name: 'Computer Peripherals', count: 32 },
+      { id: 'CAT-4', name: 'Office Displays', count: 12 }
+    ],
+
+    brands: [
+      { id: 'BR-1', name: 'Dell', count: 15 },
+      { id: 'BR-2', name: 'UGREEN', count: 22 },
+      { id: 'BR-3', name: 'Logitech', count: 28 },
+      { id: 'BR-4', name: 'Honeywell', count: 6 },
+      { id: 'BR-5', name: 'Apple', count: 14 }
+    ],
+
+    units: [
+      { id: 'U-1', name: 'Piece', abbr: 'Pc' },
+      { id: 'U-2', name: 'Box', abbr: 'Box' },
+      { id: 'U-3', name: 'Meter', abbr: 'M' }
+    ],
+
+    suppliers: [
+      { id: 'SUP-1', name: 'ABC Electronics Ltd', contact: 'Kamal Silva', phone: '+94 77 123 4567', email: 'orders@abcelectronics.lk', address: '45 Station Road, Colombo 03', status: 'Active' },
+      { id: 'SUP-2', name: 'XYZ Traders & Co', contact: 'Nimal Jayasinghe', phone: '+94 11 234 5678', email: 'sales@xyztraders.com', address: '12 Harbor Line, Galle', status: 'Active' },
+      { id: 'SUP-3', name: 'Apex Tech Distributors', contact: 'Sarah Chen', phone: '+94 71 987 6543', email: 'distribution@apextech.com', address: '88 Tech Park, Kandy', status: 'Active' }
+    ],
+
+    customers: [
+      { id: 'CUST-00', name: 'Walk-in Customer', phone: 'N/A', email: 'N/A', type: 'Walk-in', status: 'Active' },
+      { id: 'CUST-01', name: 'Acme Enterprises', phone: '+94 11 444 5555', email: 'procurement@acme.lk', type: 'Registered', status: 'Active' },
+      { id: 'CUST-02', name: 'Global Logistics Ltd', phone: '+94 77 333 2222', email: 'info@globallogistics.com', type: 'Registered', status: 'Active' }
+    ],
+
+    products: [
+      { id: 'P-101', name: 'USB-C Cable 2m Braided', sku: 'CAB-USBC-2M', barcode: '890123456701', category: 'Cables & Adapters', brand: 'UGREEN', unit: 'Piece', costPrice: 280, sellingPrice: 450, reorderLevel: 20, minStock: 10, maxStock: 200, status: 'Active', stock: { 'WH-1': 5, 'WH-2': 12 } },
+      { id: 'P-102', name: 'Keyboard K120 USB', sku: 'KB-LOGI-K120', barcode: '890123456702', category: 'Computer Peripherals', brand: 'Logitech', unit: 'Piece', costPrice: 1650, sellingPrice: 2450, reorderLevel: 15, minStock: 5, maxStock: 100, status: 'Active', stock: { 'WH-1': 42, 'WH-2': 18 } },
+      { id: 'P-103', name: 'Dell UltraSharp 27" 4K Monitor', sku: 'MON-DELL-U27', barcode: '890123456703', category: 'Office Displays', brand: 'Dell', unit: 'Piece', costPrice: 85000, sellingPrice: 115000, reorderLevel: 4, minStock: 2, maxStock: 25, status: 'Active', stock: { 'WH-1': 8, 'WH-2': 2 } },
+      { id: 'P-104', name: 'MX Master 3S Wireless Mouse', sku: 'MSE-LOGI-MX3', barcode: '890123456704', category: 'Computer Peripherals', brand: 'Logitech', unit: 'Piece', costPrice: 24000, sellingPrice: 32500, reorderLevel: 8, minStock: 4, maxStock: 50, status: 'Active', stock: { 'WH-1': 14, 'WH-2': 6 } },
+      { id: 'P-105', name: 'Honeywell Barcode Scanner 2D', sku: 'SCN-HON-1950', barcode: '890123456705', category: 'Electronics', brand: 'Honeywell', unit: 'Piece', costPrice: 18500, sellingPrice: 26000, reorderLevel: 5, minStock: 2, maxStock: 30, status: 'Active', stock: { 'WH-1': 9, 'WH-2': 1 } }
+    ],
+
+    purchaseRequests: [
+      { id: 'PR-101', product: 'USB-C Cable 2m Braided', productId: 'P-101', quantity: 100, priority: 'High', requestedBy: 'Warehouse Staff', status: 'Approved', date: '2026-08-01' },
+      { id: 'PR-102', product: 'Dell UltraSharp 27" 4K Monitor', productId: 'P-103', quantity: 10, priority: 'Urgent', requestedBy: 'J. Perera', status: 'Pending Approval', date: '2026-08-04' }
+    ],
+
+    purchaseOrders: [
+      { id: 'PO-0231', supplier: 'ABC Electronics Ltd', orderDate: '2026-08-02', expectedDate: '2026-08-08', totalValue: 45000, status: 'Approved', createdBy: 'J. Perera', lines: [{ productId: 'P-101', qty: 100, unitPrice: 280, lineTotal: 28000 }] },
+      { id: 'PO-0219', supplier: 'XYZ Traders & Co', orderDate: '2026-07-28', expectedDate: '2026-08-03', totalValue: 165000, status: 'Completed', createdBy: 'J. Perera', lines: [{ productId: 'P-102', qty: 100, unitPrice: 1650, lineTotal: 165000 }] }
+    ],
+
+    goodsReceipts: [
+      { id: 'GRN-501', poId: 'PO-0219', supplier: 'XYZ Traders & Co', receivedDate: '2026-08-03', receivedBy: 'Warehouse Staff', status: 'Completed', warehouseId: 'WH-1', lines: [{ productId: 'P-102', orderedQty: 100, receivedQty: 100, damagedQty: 0, acceptedQty: 100 }] }
+    ],
+
+    stockTransfers: [
+      { id: 'ST-801', productId: 'P-101', productName: 'USB-C Cable 2m Braided', fromWh: 'WH-1', toWh: 'WH-2', qty: 10, status: 'In Transit', date: '2026-08-04', initiatedBy: 'Warehouse Staff' }
+    ],
+
+    stockAdjustments: [
+      { id: 'SA-901', productId: 'P-101', productName: 'USB-C Cable 2m Braided', warehouseId: 'WH-1', currentQty: 10, adjustmentQty: -5, newQty: 5, reason: 'Damage', adjustedBy: 'Warehouse Staff', date: '2026-08-04' }
+    ],
+
+    transactions: [
+      { id: 'TX-1001', date: '2026-08-04 10:30', product: 'USB-C Cable 2m Braided', type: 'Adjustment Decrease', qty: -5, warehouse: 'Main Warehouse', reference: 'SA-901', user: 'Warehouse Staff' },
+      { id: 'TX-1002', date: '2026-08-03 14:15', product: 'Keyboard K120 USB', type: 'Purchase', qty: +100, warehouse: 'Main Warehouse', reference: 'GRN-501', user: 'Warehouse Staff' },
+      { id: 'TX-1003', date: '2026-08-03 16:45', product: 'Keyboard K120 USB', type: 'Sale', qty: -2, warehouse: 'Main Warehouse', reference: 'S-4482', user: 'Cashier' }
+    ],
+
+    salesOrders: [
+      { id: 'SO-4401', customer: 'Acme Enterprises', orderDate: '2026-08-04', total: 24500, status: 'Confirmed', createdBy: 'Cashier' }
+    ],
+
+    customerReturns: [
+      { id: 'CR-301', saleRef: 'S-4482', customer: 'Walk-in Customer', product: 'Keyboard K120 USB', qty: 1, reason: 'Defective', action: 'Refund', status: 'Pending Approval', date: '2026-08-04' }
+    ],
+
+    supplierReturns: [
+      { id: 'SR-201', poRef: 'PO-0219', supplier: 'XYZ Traders & Co', product: 'Keyboard K120 USB', qty: 2, status: 'Sent', date: '2026-08-04' }
+    ],
+
+    auditLogs: [
+      { id: 'LOG-8801', user: 'Admin', action: 'Product Price Updated', entity: 'P-102 (Keyboard K120)', oldVal: 'Rs. 2,300', newVal: 'Rs. 2,450', timestamp: '2026-08-04 09:12' },
+      { id: 'LOG-8802', user: 'Warehouse Staff', action: 'Stock Adjustment Created', entity: 'SA-901 (USB-C Cable)', oldVal: '10 Units', newVal: '5 Units (Reason: Damage)', timestamp: '2026-08-04 10:30' },
+      { id: 'LOG-8803', user: 'Cashier', action: 'POS Sale Executed', entity: 'Sale #S-4482', oldVal: 'Pending', newVal: 'Completed (Total: Rs. 4,900)', timestamp: '2026-08-03 16:45' }
+    ],
+
+    users: [
+      { id: 'USR-1', name: 'J. Perera', email: 'admin@company.com', role: 'Admin', status: 'Active', lastLogin: '2026-08-05 01:20' },
+      { id: 'USR-2', name: 'S. Silva', email: 'manager@company.com', role: 'Manager', status: 'Active', lastLogin: '2026-08-04 17:45' },
+      { id: 'USR-3', name: 'M. Bandara', email: 'warehouse@company.com', role: 'Warehouse Staff', status: 'Active', lastLogin: '2026-08-04 14:10' },
+      { id: 'USR-4', name: 'K. Fernando', email: 'cashier@company.com', role: 'Cashier', status: 'Active', lastLogin: '2026-08-04 18:30' }
+    ]
+  },
+
+  // -------------------------------------------------------------
+  // INITIALIZATION & RBAC CONTROLLER
+  // -------------------------------------------------------------
+  init() {
+    this.renderSidebarNav();
+    this.updateUserHeader();
+    this.navigate('dashboard');
+    lucide.createIcons();
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        document.getElementById('global-search-input').focus();
+      }
+    });
+  },
+
+  login() {
+    document.getElementById('login-page').style.display = 'none';
+    this.toast(`Signed in successfully as ${this.currentUser.name} (${this.currentUser.role})`, 'success');
+  },
+
+  logout() {
+    document.getElementById('login-page').style.display = 'flex';
+  },
+
+  switchRole(newRole) {
+    this.currentUser.role = newRole;
+    if (newRole === 'Cashier') {
+      this.currentUser.name = 'K. Fernando';
+    } else if (newRole === 'Warehouse Staff') {
+      this.currentUser.name = 'M. Bandara';
+    } else if (newRole === 'Manager') {
+      this.currentUser.name = 'S. Silva';
+    } else {
+      this.currentUser.name = 'J. Perera';
+    }
+    
+    document.getElementById('header-role-select').value = newRole;
+    this.updateUserHeader();
+    this.renderSidebarNav();
+    
+    // Auto-redirect if current route restricted
+    if (newRole === 'Cashier') {
+      this.navigate('pos');
+    } else if (newRole === 'Warehouse Staff' && (this.activeRoute === 'users' || this.activeRoute === 'reports')) {
+      this.navigate('dashboard');
+    } else {
+      this.navigate(this.activeRoute);
+    }
+    
+    this.toast(`Role switched to ${newRole}`, 'info');
+  },
+
+  updateUserHeader() {
+    const initials = this.currentUser.name.split(' ').map(n => n[0]).join('');
+    document.getElementById('user-avatar-initials').textContent = initials;
+    document.getElementById('user-display-name').textContent = this.currentUser.name;
+    document.getElementById('user-display-role').textContent = this.currentUser.role;
+  },
+
+  toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('collapsed');
+    this.sidebarCollapsed = sidebar.classList.contains('collapsed');
+    const icon = document.getElementById('collapse-icon');
+    icon.setAttribute('data-lucide', this.sidebarCollapsed ? 'chevrons-right' : 'chevrons-left');
+    lucide.createIcons();
+  },
+
+  // -------------------------------------------------------------
+  // SIDEBAR NAVIGATION GENERATOR (RBAC ENFORCED)
+  // -------------------------------------------------------------
+  renderSidebarNav() {
+    const role = this.currentUser.role;
+    const container = document.getElementById('sidebar-nav-container');
+    
+    // Menu item definitions with RBAC flags
+    const menuStructure = [
+      {
+        group: 'Overview',
+        items: [
+          { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', roles: ['Admin', 'Manager', 'Warehouse Staff', 'Cashier'] },
+          { id: 'pos', label: 'POS Terminal', icon: 'shopping-cart', roles: ['Admin', 'Manager', 'Cashier'] }
+        ]
+      },
+      {
+        group: 'Catalog & Inventory',
+        items: [
+          { id: 'products', label: 'Products Master', icon: 'package', roles: ['Admin', 'Manager', 'Warehouse Staff', 'Cashier'] },
+          { id: 'catalog-settings', label: 'Categories / Brands', icon: 'tags', roles: ['Admin', 'Manager'] },
+          { id: 'inventory-ledger', label: 'Stock Movement Ledger', icon: 'history', roles: ['Admin', 'Manager', 'Warehouse Staff'] }
+        ]
+      },
+      {
+        group: 'Purchasing & Supply',
+        items: [
+          { id: 'purchase-requests', label: 'Purchase Requests', icon: 'file-text', roles: ['Admin', 'Manager', 'Warehouse Staff'] },
+          { id: 'purchase-orders', label: 'Purchase Orders', icon: 'shopping-bag', roles: ['Admin', 'Manager', 'Warehouse Staff'] },
+          { id: 'goods-receipts', label: 'Goods Receipts (GRN)', icon: 'truck', roles: ['Admin', 'Manager', 'Warehouse Staff'] },
+          { id: 'suppliers', label: 'Suppliers Directory', icon: 'users', roles: ['Admin', 'Manager', 'Warehouse Staff'] }
+        ]
+      },
+      {
+        group: 'Warehouse Ops',
+        items: [
+          { id: 'warehouses', label: 'Warehouses', icon: 'building-2', roles: ['Admin', 'Manager', 'Warehouse Staff'] },
+          { id: 'stock-transfers', label: 'Stock Transfers', icon: 'arrow-left-right', roles: ['Admin', 'Manager', 'Warehouse Staff'] },
+          { id: 'stock-adjustments', label: 'Stock Adjustments', icon: 'sliders', roles: ['Admin', 'Manager', 'Warehouse Staff'] }
+        ]
+      },
+      {
+        group: 'Sales & Returns',
+        items: [
+          { id: 'sales-orders', label: 'Sales Orders', icon: 'receipt', roles: ['Admin', 'Manager', 'Cashier'] },
+          { id: 'customers', label: 'Customers', icon: 'user-check', roles: ['Admin', 'Manager', 'Cashier'] },
+          { id: 'customer-returns', label: 'Customer Returns', icon: 'rotate-ccw', roles: ['Admin', 'Manager', 'Cashier'] },
+          { id: 'supplier-returns', label: 'Supplier Returns', icon: 'corner-up-left', roles: ['Admin', 'Manager', 'Warehouse Staff'] }
+        ]
+      },
+      {
+        group: 'Governance & Analytics',
+        items: [
+          { id: 'reports', label: 'Analytics & Reports', icon: 'bar-chart-3', roles: ['Admin', 'Manager', 'Warehouse Staff', 'Cashier'] },
+          { id: 'audit-logs', label: 'Audit Logs', icon: 'shield', roles: ['Admin'] },
+          { id: 'users', label: 'Users & Permissions', icon: 'user-cog', roles: ['Admin'] }
+        ]
+      }
+    ];
+
+    let html = '';
+    menuStructure.forEach(sec => {
+      const allowedItems = sec.items.filter(item => item.roles.includes(role));
+      if (allowedItems.length > 0) {
+        html += `<div class="nav-group-title">${sec.group}</div>`;
+        allowedItems.forEach(item => {
+          const isActive = this.activeRoute === item.id ? 'active' : '';
+          html += `
+            <a class="nav-item ${isActive}" onclick="App.navigate('${item.id}')">
+              <i data-lucide="${item.icon}" style="width: 18px; height: 18px;"></i>
+              <span class="nav-item-label">${item.label}</span>
+            </a>
+          `;
+        });
+      }
+    });
+
+    container.innerHTML = html;
+    lucide.createIcons();
+  },
+
+  // -------------------------------------------------------------
+  // ROUTER CONTROLLER
+  // -------------------------------------------------------------
+  navigate(routeId, params = {}) {
+    this.activeRoute = routeId;
+    this.renderSidebarNav();
+    
+    const content = document.getElementById('content-area');
+    
+    // Breadcrumb generator
+    const routeNames = {
+      dashboard: 'Dashboard / Overview',
+      products: 'Catalog / Products Master',
+      'product-detail': `Catalog / Product Details (${params.id || ''})`,
+      'catalog-settings': 'Catalog / Categories, Brands & Units',
+      suppliers: 'Purchasing / Suppliers Directory',
+      'supplier-detail': `Purchasing / Supplier Profile (${params.id || ''})`,
+      customers: 'Sales / Customer Directory',
+      'purchase-requests': 'Purchasing / Purchase Requests',
+      'purchase-orders': 'Purchasing / Purchase Orders',
+      'po-create': 'Purchasing / New Purchase Order',
+      'po-detail': `Purchasing / PO Details (${params.id || ''})`,
+      'goods-receipts': 'Purchasing / Goods Receipts (GRN)',
+      'grn-create': 'Purchasing / New Goods Receipt',
+      warehouses: 'Warehouse / Physical Locations',
+      'warehouse-detail': `Warehouse / Location Details (${params.id || ''})`,
+      'stock-transfers': 'Warehouse / Stock Transfers',
+      'stock-adjustments': 'Warehouse / Stock Adjustments',
+      'inventory-ledger': 'Inventory / Stock Movement Ledger',
+      pos: 'Sales / Point of Sale Terminal',
+      'sales-orders': 'Sales / Sales Orders',
+      'customer-returns': 'Sales / Customer Returns',
+      'supplier-returns': 'Purchasing / Supplier Returns',
+      reports: 'Analytics & Management Reports',
+      'audit-logs': 'Governance / Audit Logs',
+      users: 'Administration / Users & Permissions'
+    };
+
+    const bc = routeNames[routeId] || routeId;
+    
+    // Render view based on route
+    switch (routeId) {
+      case 'dashboard': content.innerHTML = this.views.dashboard(); break;
+      case 'products': content.innerHTML = this.views.products(); break;
+      case 'product-detail': content.innerHTML = this.views.productDetail(params.id); break;
+      case 'catalog-settings': content.innerHTML = this.views.catalogSettings(); break;
+      case 'suppliers': content.innerHTML = this.views.suppliers(); break;
+      case 'supplier-detail': content.innerHTML = this.views.supplierDetail(params.id); break;
+      case 'customers': content.innerHTML = this.views.customers(); break;
+      case 'purchase-requests': content.innerHTML = this.views.purchaseRequests(); break;
+      case 'purchase-orders': content.innerHTML = this.views.purchaseOrders(); break;
+      case 'po-create': content.innerHTML = this.views.poCreate(); break;
+      case 'po-detail': content.innerHTML = this.views.poDetail(params.id); break;
+      case 'goods-receipts': content.innerHTML = this.views.goodsReceipts(); break;
+      case 'grn-create': content.innerHTML = this.views.grnCreate(); break;
+      case 'warehouses': content.innerHTML = this.views.warehouses(); break;
+      case 'warehouse-detail': content.innerHTML = this.views.warehouseDetail(params.id); break;
+      case 'stock-transfers': content.innerHTML = this.views.stockTransfers(); break;
+      case 'stock-adjustments': content.innerHTML = this.views.stockAdjustments(); break;
+      case 'inventory-ledger': content.innerHTML = this.views.inventoryLedger(); break;
+      case 'pos': content.innerHTML = this.views.pos(); break;
+      case 'sales-orders': content.innerHTML = this.views.salesOrders(); break;
+      case 'customer-returns': content.innerHTML = this.views.customerReturns(); break;
+      case 'supplier-returns': content.innerHTML = this.views.supplierReturns(); break;
+      case 'reports': content.innerHTML = this.views.reports(); break;
+      case 'audit-logs': content.innerHTML = this.views.auditLogs(); break;
+      case 'users': content.innerHTML = this.views.users(); break;
+      default: content.innerHTML = `<h2>404 - View Not Found</h2>`;
+    }
+
+    // Prepend Breadcrumb
+    content.insertAdjacentHTML('afterbegin', `
+      <div class="breadcrumb-trail">
+        <i data-lucide="home" style="width: 14px; height: 14px;"></i>
+        <span>/</span>
+        <span>${bc}</span>
+      </div>
+    `);
+
+    lucide.createIcons();
+    window.scrollTo(0, 0);
+  },
+
+  // -------------------------------------------------------------
+  // UI HELPERS (TOAST, MODAL, DRAWER)
+  // -------------------------------------------------------------
+  toast(msg, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const icons = { success: 'check-circle-2', warning: 'alert-triangle', danger: 'x-circle', info: 'info' };
+    const colors = { success: 'var(--color-success)', warning: 'var(--color-warning)', danger: 'var(--color-danger)', info: 'var(--color-accent)' };
+    
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.style.borderColor = colors[type];
+    toast.innerHTML = `
+      <i data-lucide="${icons[type]}" style="width: 18px; height: 18px; color: ${colors[type]};"></i>
+      <span style="font-size: 13px; font-weight: 500; flex: 1;">${msg}</span>
+      <button class="btn btn-icon btn-sm" style="border: none;" onclick="this.parentElement.remove()"><i data-lucide="x" style="width: 14px; height: 14px;"></i></button>
+    `;
+    container.appendChild(toast);
+    lucide.createIcons();
+    setTimeout(() => { toast.remove(); }, 4000);
+  },
+
+  openDrawer(title, contentHtml) {
+    document.getElementById('drawer-title').textContent = title;
+    document.getElementById('drawer-body').innerHTML = contentHtml;
+    document.getElementById('global-drawer-backdrop').classList.add('open');
+    lucide.createIcons();
+  },
+
+  closeDrawer() {
+    document.getElementById('global-drawer-backdrop').classList.remove('open');
+  },
+
+  openModal(title, contentHtml, onConfirm) {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').innerHTML = contentHtml;
+    const confirmBtn = document.getElementById('modal-confirm-btn');
+    confirmBtn.onclick = () => {
+      if (onConfirm) onConfirm();
+      App.closeModal();
+    };
+    document.getElementById('global-modal-backdrop').classList.add('open');
+    lucide.createIcons();
+  },
+
+  closeModal() {
+    document.getElementById('global-modal-backdrop').classList.remove('open');
+  },
+
+  openNotificationsDrawer() {
+    this.openDrawer('System Notifications & Alerts', `
+      <div class="flex flex-col gap-3">
+        <div class="card flex items-center gap-3" style="border-left: 3px solid var(--color-warning);">
+          <i data-lucide="alert-triangle" style="color: var(--color-warning); width: 20px; height: 20px;"></i>
+          <div>
+            <div class="font-medium text-sm">Low Stock Alert: USB-C Cable</div>
+            <div class="text-xs text-muted">Stock level (5 Pcs) is below reorder threshold (20 Pcs).</div>
+          </div>
+        </div>
+        <div class="card flex items-center gap-3" style="border-left: 3px solid var(--color-accent);">
+          <i data-lucide="clock" style="color: var(--color-accent); width: 20px; height: 20px;"></i>
+          <div>
+            <div class="font-medium text-sm">Approval Required: PR-102</div>
+            <div class="text-xs text-muted">Purchase Request for 10 Dell Monitors requires Manager sign-off.</div>
+          </div>
+        </div>
+        <div class="card flex items-center gap-3" style="border-left: 3px solid var(--color-success);">
+          <i data-lucide="check-circle-2" style="color: var(--color-success); width: 20px; height: 20px;"></i>
+          <div>
+            <div class="font-medium text-sm">GRN Confirmed: GRN-501</div>
+            <div class="text-xs text-muted">100 Keyboards received into Main Warehouse.</div>
+          </div>
+        </div>
+      </div>
+    `);
+  },
+
+  handleGlobalSearch(query) {
+    if (!query) return;
+    console.log('Omnisearching:', query);
+  },
+
+  // Helper to compute total product stock
+  getTotalStock(product) {
+    return Object.values(product.stock).reduce((a, b) => a + b, 0);
+  },
+
+  // Helper to format LKR Currency
+  formatCurrency(val) {
+    return 'Rs. ' + Number(val).toLocaleString('en-US');
+  },
+
+  // -------------------------------------------------------------
+  // VIEW RENDERERS (COMPONENTS FOR ALL 23 SECTIONS)
+  // -------------------------------------------------------------
+  views: {
+    // 3. DASHBOARD
+    dashboard() {
+      const role = App.currentUser.role;
+      const isFin = role === 'Admin' || role === 'Manager';
+
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Executive Operational Cockpit</h1>
+            <p class="text-xs text-muted">Real-time inventory metrics, order status, and quick operations</p>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary" onclick="App.navigate('inventory-ledger')"><i data-lucide="history" style="width: 16px; height: 16px;"></i> View Ledger</button>
+            <button class="btn btn-primary" onclick="App.navigate('po-create')"><i data-lucide="plus" style="width: 16px; height: 16px;"></i> + Create PO</button>
+          </div>
+        </div>
+
+        <!-- Summary Metric Cards -->
+        <div class="summary-grid">
+          <div class="stat-card">
+            <div class="text-xs uppercase-eyebrow">Total Catalog SKUs</div>
+            <div class="stat-value">${App.db.products.length}</div>
+            <span class="text-xs text-muted">▲ 2 added this week</span>
+          </div>
+
+          ${isFin ? `
+          <div class="stat-card">
+            <div class="text-xs uppercase-eyebrow">Total Inventory Value</div>
+            <div class="stat-value text-lg">${App.formatCurrency(6770000)}</div>
+            <span class="text-xs text-muted">Across 2 Warehouses</span>
+          </div>
+          <div class="stat-card">
+            <div class="text-xs uppercase-eyebrow">Today's POS Sales</div>
+            <div class="stat-value text-lg">${App.formatCurrency(145000)}</div>
+            <span class="text-xs text-muted">14 Transactions</span>
+          </div>
+          ` : ''}
+
+          <div class="stat-card">
+            <div class="text-xs uppercase-eyebrow">Low Stock Items</div>
+            <div class="stat-value" style="color: var(--color-warning);">1</div>
+            <span class="text-xs text-muted">Action Required</span>
+          </div>
+
+          <div class="stat-card">
+            <div class="text-xs uppercase-eyebrow">Pending Purchase Orders</div>
+            <div class="stat-value">1</div>
+            <span class="text-xs text-muted">PO-0231 (Approved)</span>
+          </div>
+
+          <div class="stat-card">
+            <div class="text-xs uppercase-eyebrow">Pending Approvals</div>
+            <div class="stat-value" style="color: var(--color-accent);">1</div>
+            <span class="text-xs text-muted">PR-102 (Urgent)</span>
+          </div>
+        </div>
+
+        <!-- Charts & Analytics Row -->
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px;">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="text-base font-semibold">Stock Movement & Sales Velocity (30 Days)</h3>
+              <div class="badge badge-accent">Live Feed</div>
+            </div>
+            <!-- Canvas Chart Mock -->
+            <div style="height: 200px; display: flex; align-items: flex-end; gap: 16px; padding-top: 20px; border-bottom: 1px dashed var(--color-border);">
+              <div style="flex:1; background: var(--color-accent-soft); border-top: 3px solid var(--color-accent); height: 40%;" title="Week 1: 120 Units"></div>
+              <div style="flex:1; background: var(--color-accent-soft); border-top: 3px solid var(--color-accent); height: 65%;" title="Week 2: 210 Units"></div>
+              <div style="flex:1; background: var(--color-accent-soft); border-top: 3px solid var(--color-accent); height: 85%;" title="Week 3: 340 Units"></div>
+              <div style="flex:1; background: var(--color-accent); border-top: 3px solid var(--color-accent-hover); height: 100%;" title="Week 4: 420 Units"></div>
+            </div>
+            <div class="flex justify-between text-xs text-muted mt-2" style="margin-top: 8px;">
+              <span>Week 1</span><span>Week 2</span><span>Week 3</span><span>Current Week</span>
+            </div>
+          </div>
+
+          <!-- Low Stock Alerts Panel -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="text-base font-semibold flex items-center gap-2">
+                <i data-lucide="alert-triangle" style="width: 16px; height: 16px; color: var(--color-warning);"></i> Low Stock Alerts
+              </h3>
+            </div>
+            <div class="flex flex-col gap-3">
+              ${App.db.products.filter(p => App.getTotalStock(p) <= p.reorderLevel).map(p => `
+                <div style="padding: 8px; border: 1px solid var(--color-border); background: #FFFBEB;">
+                  <div class="flex justify-between font-medium text-xs">
+                    <span>${p.name}</span>
+                    <span class="badge badge-warning">Qty: ${App.getTotalStock(p)}</span>
+                  </div>
+                  <div class="text-xs text-muted" style="margin-top: 4px;">Reorder Level: ${p.reorderLevel} ${p.unit}s | SKU: ${p.sku}</div>
+                  <button class="btn btn-secondary btn-sm w-full mt-2" style="margin-top: 6px;" onclick="App.navigate('product-detail', {id: '${p.id}'})">View Details</button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity Feed -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="text-base font-semibold">Real-Time System Activity Feed</h3>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Actor</th>
+                <th>Action & Entity</th>
+                <th>Reference</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.auditLogs.map(l => `
+                <tr>
+                  <td class="font-mono text-xs">${l.timestamp}</td>
+                  <td class="font-medium">${l.user}</td>
+                  <td>${l.action} — <span class="text-muted">${l.entity}</span></td>
+                  <td><span class="badge">${l.id}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 4.1 PRODUCT LIST
+    products() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Products Catalog Master</h1>
+            <p class="text-xs text-muted">Browse, filter, and manage all master product records</p>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary" onclick="App.toast('Exporting Products CSV...', 'info')"><i data-lucide="download" style="width: 16px; height: 16px;"></i> Export CSV</button>
+            ${App.currentUser.role !== 'Cashier' && App.currentUser.role !== 'Warehouse Staff' ? `
+              <button class="btn btn-primary" onclick="App.openCreateProductDrawer()"><i data-lucide="plus" style="width: 16px; height: 16px;"></i> + New Product</button>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="card flex items-center gap-3 mb-4" style="margin-bottom: 16px; padding: 12px;">
+          <div class="flex-1">
+            <input type="text" class="form-control" placeholder="Search by name, SKU, or barcode..." onkeyup="App.filterProductsTable(this.value)">
+          </div>
+          <select class="form-control form-select" style="width: 160px;">
+            <option value="">All Categories</option>
+            ${App.db.categories.map(c => `<option>${c.name}</option>`).join('')}
+          </select>
+          <select class="form-control form-select" style="width: 140px;">
+            <option value="">All Brands</option>
+            ${App.db.brands.map(b => `<option>${b.name}</option>`).join('')}
+          </select>
+          <button class="btn btn-secondary btn-sm">Clear Filters</button>
+        </div>
+
+        <!-- Product Data Table -->
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 30px;"><input type="checkbox"></th>
+                <th>Product Name</th>
+                <th>SKU</th>
+                <th>Barcode</th>
+                <th>Category</th>
+                <th>Brand</th>
+                <th>Unit</th>
+                <th>Derived Stock</th>
+                <th class="text-right">Selling Price</th>
+                <th>Status</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.products.map(p => {
+                const totalStock = App.getTotalStock(p);
+                return `
+                  <tr>
+                    <td><input type="checkbox"></td>
+                    <td class="font-medium">
+                      <a href="#" onclick="App.navigate('product-detail', {id: '${p.id}'}); return false;" style="color: var(--color-accent); text-decoration: none;">${p.name}</a>
+                    </td>
+                    <td class="font-mono text-xs">${p.sku}</td>
+                    <td class="font-mono text-xs">${p.barcode}</td>
+                    <td>${p.category}</td>
+                    <td>${p.brand}</td>
+                    <td>${p.unit}</td>
+                    <td class="font-mono">${totalStock} ${p.unit}s</td>
+                    <td class="text-right font-mono font-medium">${App.formatCurrency(p.sellingPrice)}</td>
+                    <td><span class="badge badge-success"><i data-lucide="check-circle-2" style="width: 12px; height: 12px;"></i> Active</span></td>
+                    <td class="text-right">
+                      <button class="btn btn-icon btn-sm" onclick="App.navigate('product-detail', {id: '${p.id}'})" title="View Product"><i data-lucide="eye" style="width: 14px; height: 14px;"></i></button>
+                      ${App.currentUser.role === 'Admin' || App.currentUser.role === 'Manager' ? `
+                        <button class="btn btn-icon btn-sm" onclick="App.openEditProductDrawer('${p.id}')" title="Edit Product"><i data-lucide="edit-2" style="width: 14px; height: 14px;"></i></button>
+                      ` : ''}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 4.3 PRODUCT DETAILS (TABBED)
+    productDetail(id) {
+      const p = App.db.products.find(x => x.id === id) || App.db.products[0];
+      const totalStock = App.getTotalStock(p);
+      const margin = Math.round(((p.sellingPrice - p.costPrice) / p.sellingPrice) * 100);
+
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">${p.name}</h1>
+            <p class="text-xs text-muted">SKU: ${p.sku} | Barcode: ${p.barcode}</p>
+          </div>
+          <div class="flex gap-2">
+            <span class="badge badge-success"><i data-lucide="check-circle-2" style="width: 12px; height: 12px;"></i> Active</span>
+            ${App.currentUser.role === 'Admin' || App.currentUser.role === 'Manager' ? `
+              <button class="btn btn-primary" onclick="App.openEditProductDrawer('${p.id}')"><i data-lucide="edit-2" style="width: 14px; height: 14px;"></i> Edit Master</button>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Product Tabbed Interface -->
+        <div class="card">
+          <div class="tabs-header">
+            <button class="tab-btn active" onclick="App.switchTab('p-tab-info', this)">Basic Information</button>
+            <button class="tab-btn" onclick="App.switchTab('p-tab-suppliers', this)">Supplier Rates</button>
+            <button class="tab-btn" onclick="App.switchTab('p-tab-inventory', this)">Warehouse Stock</button>
+            <button class="tab-btn" onclick="App.switchTab('p-tab-history', this)">Stock History Ledger</button>
+          </div>
+
+          <!-- Tab 1: Basic Info -->
+          <div id="p-tab-info" class="tab-content">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+              <div>
+                <h3 class="text-base font-semibold mb-3">Classification & Units</h3>
+                <table class="data-table">
+                  <tr><td class="text-muted" style="width: 140px;">Category</td><td class="font-medium">${p.category}</td></tr>
+                  <tr><td class="text-muted">Brand</td><td class="font-medium">${p.brand}</td></tr>
+                  <tr><td class="text-muted">Unit of Measure</td><td class="font-medium">${p.unit}</td></tr>
+                  <tr><td class="text-muted">Status</td><td>Active</td></tr>
+                </table>
+              </div>
+              <div>
+                <h3 class="text-base font-semibold mb-3">Pricing & Margin Rules</h3>
+                <table class="data-table">
+                  <tr><td class="text-muted" style="width: 140px;">Cost Price</td><td class="font-mono">${App.formatCurrency(p.costPrice)}</td></tr>
+                  <tr><td class="text-muted">Selling Price</td><td class="font-mono font-medium">${App.formatCurrency(p.sellingPrice)}</td></tr>
+                  <tr><td class="text-muted">Computed Margin</td><td class="font-mono text-success" style="color: var(--color-success); font-weight: 600;">${margin}% Gross Margin</td></tr>
+                  <tr><td class="text-muted">Reorder Threshold</td><td class="font-mono">${p.reorderLevel} ${p.unit}s</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Supplier Rates -->
+          <div id="p-tab-suppliers" class="tab-content" style="display: none;">
+            <h3 class="text-base font-semibold mb-3">Linked Vendor Pricing</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Supplier Name</th>
+                  <th>Last Purchase Price</th>
+                  <th>Lead Time</th>
+                  <th>Min Order Qty</th>
+                  <th>Preference</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="font-medium">ABC Electronics Ltd</td>
+                  <td class="font-mono">${App.formatCurrency(p.costPrice)}</td>
+                  <td>3 Days</td>
+                  <td>50 Pcs</td>
+                  <td><span class="badge badge-accent">Preferred Supplier</span></td>
+                </tr>
+                <tr>
+                  <td class="font-medium">XYZ Traders & Co</td>
+                  <td class="font-mono">${App.formatCurrency(p.costPrice + 20)}</td>
+                  <td>5 Days</td>
+                  <td>20 Pcs</td>
+                  <td><span class="badge">Secondary</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tab 3: Inventory Breakdown -->
+          <div id="p-tab-inventory" class="tab-content" style="display: none;">
+            <h3 class="text-base font-semibold mb-3">Physical Location Quantities</h3>
+            <table class="data-table mb-4">
+              <thead>
+                <tr>
+                  <th>Warehouse</th>
+                  <th>Location / Bin</th>
+                  <th>Available Quantity</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${App.db.warehouses.map(w => `
+                  <tr>
+                    <td class="font-medium">${w.name}</td>
+                    <td class="font-mono text-xs">Bin A-${Math.floor(Math.random()*10)+1}</td>
+                    <td class="font-mono font-bold">${p.stock[w.id] || 0} ${p.unit}s</td>
+                    <td><span class="badge badge-success">In Stock</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <div class="flex justify-between items-center p-3" style="background: var(--color-bg); border: 1px solid var(--color-border-strong);">
+              <span class="font-semibold text-sm">Total Derived Inventory Across All Warehouses:</span>
+              <span class="font-mono font-bold text-lg">${totalStock} ${p.unit}s</span>
+            </div>
+          </div>
+
+          <!-- Tab 4: Stock History -->
+          <div id="p-tab-history" class="tab-content" style="display: none;">
+            <h3 class="text-base font-semibold mb-3">Product Stock Movement Audit Log</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date / Time</th>
+                  <th>Movement Type</th>
+                  <th>Quantity Change</th>
+                  <th>Warehouse</th>
+                  <th>Reference</th>
+                  <th>User</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${App.db.transactions.filter(t => t.product.includes(p.name.split(' ')[0])).map(t => `
+                  <tr>
+                    <td class="font-mono text-xs">${t.date}</td>
+                    <td><span class="badge">${t.type}</span></td>
+                    <td class="font-mono font-bold" style="color: ${t.qty > 0 ? 'var(--color-success)' : 'var(--color-danger)'};">${t.qty > 0 ? '+' : ''}${t.qty}</td>
+                    <td>${t.warehouse}</td>
+                    <td class="font-mono text-xs">${t.reference}</td>
+                    <td>${t.user}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      `;
+    },
+
+    // 5. CATEGORY, BRAND & UNIT MANAGEMENT
+    catalogSettings() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Catalog Settings & Attributes</h1>
+            <p class="text-xs text-muted">Manage product categories, brands, and units of measurement</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="tabs-header">
+            <button class="tab-btn active" onclick="App.switchTab('cs-tab-cat', this)">Categories</button>
+            <button class="tab-btn" onclick="App.switchTab('cs-tab-brand', this)">Brands</button>
+            <button class="tab-btn" onclick="App.switchTab('cs-tab-unit', this)">Units of Measure</button>
+          </div>
+
+          <!-- Categories -->
+          <div id="cs-tab-cat" class="tab-content">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="text-base font-semibold">Categories List</h3>
+              <button class="btn btn-primary btn-sm" onclick="App.openAddModal('Category')">+ Add Category</button>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr><th>Category Name</th><th>Linked SKUs</th><th class="text-right">Actions</th></tr>
+              </thead>
+              <tbody>
+                ${App.db.categories.map(c => `
+                  <tr>
+                    <td class="font-medium">${c.name}</td>
+                    <td class="font-mono">${c.count} Products</td>
+                    <td class="text-right">
+                      <button class="btn btn-icon btn-sm" title="Edit"><i data-lucide="edit-2" style="width: 14px; height: 14px;"></i></button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Brands -->
+          <div id="cs-tab-brand" class="tab-content" style="display: none;">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="text-base font-semibold">Brands List</h3>
+              <button class="btn btn-primary btn-sm" onclick="App.openAddModal('Brand')">+ Add Brand</button>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr><th>Brand Name</th><th>Linked SKUs</th><th class="text-right">Actions</th></tr>
+              </thead>
+              <tbody>
+                ${App.db.brands.map(b => `
+                  <tr>
+                    <td class="font-medium">${b.name}</td>
+                    <td class="font-mono">${b.count} Products</td>
+                    <td class="text-right">
+                      <button class="btn btn-icon btn-sm" title="Edit"><i data-lucide="edit-2" style="width: 14px; height: 14px;"></i></button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Units -->
+          <div id="cs-tab-unit" class="tab-content" style="display: none;">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="text-base font-semibold">Units of Measurement</h3>
+              <button class="btn btn-primary btn-sm" onclick="App.openAddModal('Unit')">+ Add Unit</button>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr><th>Unit Name</th><th>Abbreviation</th><th class="text-right">Actions</th></tr>
+              </thead>
+              <tbody>
+                ${App.db.units.map(u => `
+                  <tr>
+                    <td class="font-medium">${u.name}</td>
+                    <td class="font-mono">${u.abbr}</td>
+                    <td class="text-right">
+                      <button class="btn btn-icon btn-sm" title="Edit"><i data-lucide="edit-2" style="width: 14px; height: 14px;"></i></button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    },
+
+    // 6. SUPPLIER MANAGEMENT
+    suppliers() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Suppliers Directory</h1>
+            <p class="text-xs text-muted">Vendor contacts and purchasing historical records</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.openAddSupplierModal()"><i data-lucide="plus" style="width: 16px; height: 16px;"></i> + New Supplier</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Company Name</th>
+                <th>Contact Person</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Address</th>
+                <th>Status</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.suppliers.map(s => `
+                <tr>
+                  <td class="font-medium">
+                    <a href="#" onclick="App.navigate('supplier-detail', {id: '${s.id}'}); return false;" style="color: var(--color-accent); text-decoration: none;">${s.name}</a>
+                  </td>
+                  <td>${s.contact}</td>
+                  <td class="font-mono text-xs">${s.phone}</td>
+                  <td class="text-xs">${s.email}</td>
+                  <td class="text-xs text-muted">${s.address}</td>
+                  <td><span class="badge badge-success">Active</span></td>
+                  <td class="text-right">
+                    <button class="btn btn-icon btn-sm" onclick="App.navigate('supplier-detail', {id: '${s.id}'})"><i data-lucide="eye" style="width: 14px; height: 14px;"></i></button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    supplierDetail(id) {
+      const s = App.db.suppliers.find(x => x.id === id) || App.db.suppliers[0];
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">${s.name}</h1>
+            <p class="text-xs text-muted">Contact: ${s.contact} | ${s.email}</p>
+          </div>
+          <button class="btn btn-secondary" onclick="App.navigate('suppliers')">Back to Suppliers</button>
+        </div>
+
+        <div class="card mb-4" style="margin-bottom: 16px;">
+          <h3 class="text-base font-semibold mb-2">Vendor Information</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div>Phone: <span class="font-mono">${s.phone}</span></div>
+            <div>Address: ${s.address}</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="text-base font-semibold mb-3">Purchase History with ${s.name}</h3>
+          <table class="data-table">
+            <thead>
+              <tr><th>PO #</th><th>Order Date</th><th>Total Value</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.purchaseOrders.filter(po => po.supplier === s.name).map(po => `
+                <tr>
+                  <td class="font-mono font-medium">${po.id}</td>
+                  <td class="font-mono text-xs">${po.orderDate}</td>
+                  <td class="font-mono font-bold">${App.formatCurrency(po.totalValue)}</td>
+                  <td><span class="badge badge-success">${po.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 7. CUSTOMERS
+    customers() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Customer Directory</h1>
+            <p class="text-xs text-muted">Registered corporate and walk-in sales profiles</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.toast('New customer dialog opened', 'info')">+ Add Customer</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr><th>Customer Name</th><th>Phone</th><th>Email</th><th>Type</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.customers.map(c => `
+                <tr>
+                  <td class="font-medium">${c.name}</td>
+                  <td class="font-mono text-xs">${c.phone}</td>
+                  <td class="text-xs">${c.email}</td>
+                  <td><span class="badge ${c.type === 'Walk-in' ? '' : 'badge-accent'}">${c.type}</span></td>
+                  <td><span class="badge badge-success">Active</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 8. PURCHASE REQUESTS
+    purchaseRequests() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Purchase Requests</h1>
+            <p class="text-xs text-muted">Internal stock reorder requests pending Manager sign-off</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.openCreatePRModal()">+ New Purchase Request</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Request #</th>
+                <th>Product</th>
+                <th>Quantity</th>
+                <th>Priority</th>
+                <th>Requested By</th>
+                <th>Status</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.purchaseRequests.map(pr => `
+                <tr>
+                  <td class="font-mono font-medium">${pr.id}</td>
+                  <td class="font-medium">${pr.product}</td>
+                  <td class="font-mono font-bold">${pr.quantity} Pcs</td>
+                  <td><span class="badge ${pr.priority === 'Urgent' ? 'badge-danger' : 'badge-warning'}">${pr.priority}</span></td>
+                  <td>${pr.requestedBy}</td>
+                  <td><span class="badge ${pr.status === 'Approved' ? 'badge-success' : 'badge-warning'}">${pr.status}</span></td>
+                  <td class="text-right">
+                    ${(App.currentUser.role === 'Manager' || App.currentUser.role === 'Admin') && pr.status === 'Pending Approval' ? `
+                      <button class="btn btn-primary btn-sm" onclick="App.approvePR('${pr.id}')">Approve</button>
+                    ` : '<span class="text-xs text-muted">No Actions</span>'}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 9. PURCHASE ORDERS
+    purchaseOrders() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Purchase Orders</h1>
+            <p class="text-xs text-muted">Formal commercial orders raised against suppliers</p>
+          </div>
+          ${App.currentUser.role === 'Admin' || App.currentUser.role === 'Manager' ? `
+            <button class="btn btn-primary" onclick="App.navigate('po-create')">+ Create Purchase Order</button>
+          ` : ''}
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>PO Number</th>
+                <th>Supplier</th>
+                <th>Order Date</th>
+                <th>Expected Delivery</th>
+                <th class="text-right">Grand Total</th>
+                <th>Status Lifecycle</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.purchaseOrders.map(po => `
+                <tr>
+                  <td class="font-mono font-medium">
+                    <a href="#" onclick="App.navigate('po-detail', {id: '${po.id}'}); return false;" style="color: var(--color-accent);">${po.id}</a>
+                  </td>
+                  <td class="font-medium">${po.supplier}</td>
+                  <td class="font-mono text-xs">${po.orderDate}</td>
+                  <td class="font-mono text-xs">${po.expectedDate}</td>
+                  <td class="text-right font-mono font-bold">${App.formatCurrency(po.totalValue)}</td>
+                  <td><span class="badge ${po.status === 'Completed' ? 'badge-success' : 'badge-accent'}">${po.status}</span></td>
+                  <td class="text-right">
+                    <button class="btn btn-icon btn-sm" onclick="App.navigate('po-detail', {id: '${po.id}'})"><i data-lucide="eye" style="width: 14px; height: 14px;"></i></button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    poCreate() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Create New Purchase Order</h1>
+            <p class="text-xs text-muted">Generate line-item order document for supplier</p>
+          </div>
+          <button class="btn btn-secondary" onclick="App.navigate('purchase-orders')">Cancel</button>
+        </div>
+
+        <div class="card mb-4" style="margin-bottom: 16px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+            <div class="form-group">
+              <label class="form-label">Supplier</label>
+              <select class="form-control form-select">
+                ${App.db.suppliers.map(s => `<option>${s.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Order Date</label>
+              <input type="date" class="form-control" value="2026-08-05">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expected Delivery Date</label>
+              <input type="date" class="form-control" value="2026-08-12">
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4" style="margin-bottom: 16px;">
+          <h3 class="text-base font-semibold mb-3">Line Items Table</h3>
+          <table class="data-table mb-3">
+            <thead>
+              <tr><th>Product</th><th>Quantity</th><th>Unit Cost Price</th><th class="text-right">Line Total</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <select class="form-control form-select">
+                    ${App.db.products.map(p => `<option>${p.name} (${p.sku})</option>`).join('')}
+                  </select>
+                </td>
+                <td><input type="number" class="form-control font-mono" value="50" style="width: 100px;"></td>
+                <td><input type="number" class="form-control font-mono" value="280" style="width: 120px;"></td>
+                <td class="text-right font-mono font-bold">Rs. 14,000</td>
+              </tr>
+            </tbody>
+          </table>
+          <button class="btn btn-secondary btn-sm">+ Add Product Line</button>
+        </div>
+
+        <div class="flex justify-between items-center card">
+          <div class="font-mono text-lg">Grand Total: <span class="font-bold text-accent" style="color: var(--color-accent);">Rs. 14,000</span></div>
+          <button class="btn btn-primary btn-lg" onclick="App.toast('Purchase Order Created in Draft state', 'success'); App.navigate('purchase-orders');">Save & Submit Purchase Order</button>
+        </div>
+      `;
+    },
+
+    poDetail(id) {
+      const po = App.db.purchaseOrders.find(x => x.id === id) || App.db.purchaseOrders[0];
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Purchase Order ${po.id}</h1>
+            <p class="text-xs text-muted">Supplier: ${po.supplier} | Date: ${po.orderDate}</p>
+          </div>
+          <button class="btn btn-secondary" onclick="App.navigate('purchase-orders')">Back to List</button>
+        </div>
+
+        <!-- Workflow Lifecycle Stepper -->
+        <div class="stepper">
+          <div class="step-item completed"><i data-lucide="check" style="width: 14px;"></i> Draft</div>
+          <div class="step-item completed"><i data-lucide="check" style="width: 14px;"></i> Approved</div>
+          <div class="step-item active"><i data-lucide="clock" style="width: 14px;"></i> Sent to Supplier</div>
+          <div class="step-item"><i data-lucide="circle" style="width: 14px;"></i> Goods Received</div>
+          <div class="step-item"><i data-lucide="circle" style="width: 14px;"></i> Completed</div>
+        </div>
+
+        <div class="card mb-4">
+          <h3 class="text-base font-semibold mb-3">Ordered Line Items</h3>
+          <table class="data-table">
+            <thead>
+              <tr><th>Product</th><th>Ordered Qty</th><th>Unit Cost</th><th class="text-right">Total</th></tr>
+            </thead>
+            <tbody>
+              ${po.lines.map(l => {
+                const prod = App.db.products.find(p => p.id === l.productId) || { name: 'Item' };
+                return `
+                  <tr>
+                    <td class="font-medium">${prod.name}</td>
+                    <td class="font-mono">${l.qty} Pcs</td>
+                    <td class="font-mono">${App.formatCurrency(l.unitPrice)}</td>
+                    <td class="text-right font-mono font-bold">${App.formatCurrency(l.lineTotal)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 10. GOODS RECEIPT (GRN)
+    goodsReceipts() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Goods Receipts (GRN)</h1>
+            <p class="text-xs text-muted">Physical inbound receiving & inspection log</p>
+          </div>
+          ${App.currentUser.role === 'Warehouse Staff' || App.currentUser.role === 'Admin' ? `
+            <button class="btn btn-primary" onclick="App.navigate('grn-create')">+ Receive Goods Against PO</button>
+          ` : ''}
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>GRN Number</th>
+                <th>Source PO</th>
+                <th>Supplier</th>
+                <th>Received Date</th>
+                <th>Destination Warehouse</th>
+                <th>Received By</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.goodsReceipts.map(grn => `
+                <tr>
+                  <td class="font-mono font-medium">${grn.id}</td>
+                  <td class="font-mono text-xs">${grn.poId}</td>
+                  <td>${grn.supplier}</td>
+                  <td class="font-mono text-xs">${grn.receivedDate}</td>
+                  <td>Main Warehouse</td>
+                  <td>${grn.receivedBy}</td>
+                  <td><span class="badge badge-success">${grn.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    grnCreate() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">New Goods Receipt Note (GRN)</h1>
+            <p class="text-xs text-muted">Reconcile physical delivery against Purchase Order PO-0231</p>
+          </div>
+          <button class="btn btn-secondary" onclick="App.navigate('goods-receipts')">Cancel</button>
+        </div>
+
+        <div class="card mb-4" style="margin-bottom: 16px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="form-group">
+              <label class="form-label">Active Purchase Order</label>
+              <select class="form-control form-select">
+                <option>PO-0231 — ABC Electronics Ltd (Approved)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Destination Warehouse</label>
+              <select class="form-control form-select" id="grn-wh-select">
+                ${App.db.warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <h3 class="text-base font-semibold mb-3">Inspection & Reconciliation Table</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Ordered Qty</th>
+                <th>Received Qty</th>
+                <th>Damaged Qty</th>
+                <th>Accepted Qty (Stock Increase)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="font-medium">USB-C Cable 2m Braided</td>
+                <td class="font-mono">100 Pcs</td>
+                <td><input type="number" class="form-control font-mono" value="100" style="width: 90px;" id="grn-recv-qty"></td>
+                <td><input type="number" class="form-control font-mono" value="2" style="width: 90px;" id="grn-dmg-qty" onchange="document.getElementById('grn-acc-qty').textContent = (100 - this.value) + ' Pcs'"></td>
+                <td class="font-mono font-bold text-success" id="grn-acc-qty" style="color: var(--color-success);">98 Pcs</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex justify-end">
+          <button class="btn btn-primary btn-lg" onclick="App.executeGRNConfirmation()">Confirm Receipt & Update Inventory</button>
+        </div>
+      `;
+    },
+
+    // 11. WAREHOUSES
+    warehouses() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Warehouse Physical Locations</h1>
+            <p class="text-xs text-muted">Manage storage locations and bin capacities</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.toast('New warehouse creation modal', 'info')">+ Add Warehouse</button>
+        </div>
+
+        <div class="summary-grid">
+          ${App.db.warehouses.map(w => `
+            <div class="card" style="grid-column: span 3;">
+              <div class="card-header">
+                <h3 class="text-lg font-semibold">${w.name}</h3>
+                <span class="badge badge-success">${w.status}</span>
+              </div>
+              <p class="text-xs text-muted mb-3">${w.location}</p>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; background: var(--color-bg); margin-bottom: 12px;">
+                <div>
+                  <div class="text-xs text-muted">Stored SKUs</div>
+                  <div class="font-mono font-bold text-lg">${w.skus}</div>
+                </div>
+                <div>
+                  <div class="text-xs text-muted">Stock Valuation</div>
+                  <div class="font-mono font-bold text-lg">${App.formatCurrency(w.totalValue)}</div>
+                </div>
+              </div>
+              <button class="btn btn-secondary w-full" onclick="App.navigate('warehouse-detail', {id: '${w.id}'})">View Stock Detail</button>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    },
+
+    warehouseDetail(id) {
+      const w = App.db.warehouses.find(x => x.id === id) || App.db.warehouses[0];
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">${w.name} Stock Breakdown</h1>
+            <p class="text-xs text-muted">Location: ${w.location}</p>
+          </div>
+          <button class="btn btn-secondary" onclick="App.navigate('warehouses')">Back to Locations</button>
+        </div>
+
+        <div class="card">
+          <table class="data-table">
+            <thead>
+              <tr><th>Product Name</th><th>SKU</th><th>Available Qty</th><th>Reorder Level</th><th>Bin Code</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.products.map(p => `
+                <tr>
+                  <td class="font-medium">${p.name}</td>
+                  <td class="font-mono text-xs">${p.sku}</td>
+                  <td class="font-mono font-bold">${p.stock[w.id] || 0} Pcs</td>
+                  <td class="font-mono">${p.reorderLevel} Pcs</td>
+                  <td class="font-mono text-xs">Bin A-${Math.floor(Math.random()*9)+1}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 12. STOCK TRANSFERS
+    stockTransfers() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Stock Transfers</h1>
+            <p class="text-xs text-muted">Inter-warehouse stock movements tracking</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.openStockTransferModal()">+ Initiate Stock Transfer</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Transfer #</th>
+                <th>Product</th>
+                <th>From Location</th>
+                <th>To Location</th>
+                <th>Quantity</th>
+                <th>Status</th>
+                <th>Initiated By</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.stockTransfers.map(st => `
+                <tr>
+                  <td class="font-mono font-medium">${st.id}</td>
+                  <td class="font-medium">${st.productName}</td>
+                  <td>Main Warehouse</td>
+                  <td>Branch Warehouse</td>
+                  <td class="font-mono font-bold">${st.qty} Pcs</td>
+                  <td><span class="badge ${st.status === 'Completed' ? 'badge-success' : 'badge-warning'}">${st.status}</span></td>
+                  <td>${st.initiatedBy}</td>
+                  <td class="text-right">
+                    ${st.status === 'In Transit' ? `
+                      <button class="btn btn-primary btn-sm" onclick="App.completeTransfer('${st.id}')">Confirm Receipt</button>
+                    ` : '<span class="text-xs text-muted">Completed</span>'}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 13. STOCK ADJUSTMENTS
+    stockAdjustments() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Stock Adjustments</h1>
+            <p class="text-xs text-muted">Manual audit corrections for damage, loss, or count drift</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.openStockAdjustmentModal()">+ Record Adjustment</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Adjustment #</th>
+                <th>Product</th>
+                <th>Warehouse</th>
+                <th>Before Qty</th>
+                <th>Adjustment</th>
+                <th>New Qty</th>
+                <th>Reason</th>
+                <th>Adjusted By</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.stockAdjustments.map(sa => `
+                <tr>
+                  <td class="font-mono font-medium">${sa.id}</td>
+                  <td class="font-medium">${sa.productName}</td>
+                  <td>Main Warehouse</td>
+                  <td class="font-mono">${sa.currentQty}</td>
+                  <td class="font-mono font-bold text-danger">${sa.adjustmentQty}</td>
+                  <td class="font-mono font-bold">${sa.newQty}</td>
+                  <td><span class="badge badge-danger">${sa.reason}</span></td>
+                  <td>${sa.adjustedBy}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 14. INVENTORY TRANSACTION LEDGER
+    inventoryLedger() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Stock Movement Ledger</h1>
+            <p class="text-xs text-muted">Immutable transactional ledger feeding all inventory calculations</p>
+          </div>
+          <button class="btn btn-secondary" onclick="App.toast('Exporting Audit Ledger CSV...', 'info')">Export CSV</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date / Time</th>
+                <th>Product</th>
+                <th>Transaction Type</th>
+                <th>Qty Change</th>
+                <th>Warehouse</th>
+                <th>Source Reference</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${App.db.transactions.map(t => `
+                <tr>
+                  <td class="font-mono text-xs">${t.date}</td>
+                  <td class="font-medium">${t.product}</td>
+                  <td><span class="badge">${t.type}</span></td>
+                  <td class="font-mono font-bold" style="color: ${t.qty > 0 ? 'var(--color-success)' : 'var(--color-danger)'};">${t.qty > 0 ? '+' : ''}${t.qty}</td>
+                  <td>${t.warehouse}</td>
+                  <td class="font-mono text-xs">${t.reference}</td>
+                  <td>${t.user}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 15. POS TERMINAL
+    pos() {
+      return `
+        <div class="pos-container">
+          <!-- Left: Product Catalog Selection -->
+          <div class="card flex flex-col justify-between">
+            <div>
+              <div class="search-box w-full mb-3" style="width: 100%; margin-bottom: 12px;">
+                <i data-lucide="barcode" class="search-icon" style="width: 16px;"></i>
+                <input type="text" id="pos-search-input" class="form-control" placeholder="Scan barcode or type SKU/Name..." onkeyup="App.filterPosGrid(this.value)">
+              </div>
+
+              <div class="product-grid" id="pos-product-grid">
+                ${App.db.products.map(p => `
+                  <div class="product-tile" onclick="App.addToPosCart('${p.id}')">
+                    <div>
+                      <div class="font-medium text-xs mb-1" style="margin-bottom: 4px;">${p.name}</div>
+                      <div class="text-xs text-muted font-mono">${p.sku}</div>
+                    </div>
+                    <div class="flex justify-between items-center mt-2" style="margin-top: 8px;">
+                      <span class="font-mono font-bold text-xs">${App.formatCurrency(p.sellingPrice)}</span>
+                      <span class="badge" style="font-size: 9px;">Stock: ${App.getTotalStock(p)}</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <div class="flex justify-between items-center pt-3" style="border-top: 1px solid var(--color-border);">
+              <span class="text-xs text-muted">Hardware Barcode Reader Active</span>
+              <button class="btn btn-secondary btn-sm" onclick="App.toast('Held cart saved to terminal queue', 'info')">Park / Hold Sale</button>
+            </div>
+          </div>
+
+          <!-- Right: Cart & Payment -->
+          <div class="card flex flex-col justify-between">
+            <div>
+              <div class="card-header">
+                <h3 class="text-base font-semibold">Active Cart (Register 1)</h3>
+                <span class="badge badge-accent">Walk-in Customer</span>
+              </div>
+
+              <div id="pos-cart-lines" style="max-height: 260px; overflow-y: auto; margin-bottom: 16px;">
+                <!-- Dynamically filled cart items -->
+                <div class="text-center text-muted p-4" id="empty-cart-msg">Scan products or click items to add to checkout</div>
+              </div>
+            </div>
+
+            <!-- Cart Calculation Summary -->
+            <div style="border-top: 1px solid var(--color-border); padding-top: 12px;">
+              <div class="flex justify-between text-xs text-muted mb-1" style="margin-bottom: 4px;">
+                <span>Subtotal</span><span class="font-mono" id="pos-subtotal">Rs. 0</span>
+              </div>
+              <div class="flex justify-between text-xs text-muted mb-2" style="margin-bottom: 8px;">
+                <span>Tax (0% Standard)</span><span class="font-mono">Rs. 0</span>
+              </div>
+              <div class="flex justify-between font-bold text-lg mb-3" style="margin-bottom: 12px;">
+                <span>Grand Total</span><span class="font-mono text-accent" id="pos-total" style="color: var(--color-accent);">Rs. 0</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label text-xs">Cash Tendered</label>
+                <input type="number" id="pos-cash-input" class="form-control font-mono" placeholder="Enter cash received..." onkeyup="App.calcPosChange(this.value)">
+              </div>
+              <div class="flex justify-between text-xs font-mono mb-3" style="margin-bottom: 12px; font-weight: 600;">
+                <span>Change Due:</span><span id="pos-change-due" style="color: var(--color-success);">Rs. 0</span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <button class="btn btn-secondary" onclick="App.completePosSale('Card')">Pay Card</button>
+                <button class="btn btn-primary btn-lg" onclick="App.completePosSale('Cash')">Complete Sale</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    // 16. SALES ORDERS
+    salesOrders() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Sales Orders</h1>
+            <p class="text-xs text-muted">Corporate B2B non-POS sales fulfillment</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.toast('Create B2B Sales Order modal', 'info')">+ New Sales Order</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr><th>Order #</th><th>Customer</th><th>Order Date</th><th class="text-right">Total</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.salesOrders.map(so => `
+                <tr>
+                  <td class="font-mono font-medium">${so.id}</td>
+                  <td>${so.customer}</td>
+                  <td class="font-mono text-xs">${so.orderDate}</td>
+                  <td class="text-right font-mono font-bold">${App.formatCurrency(so.total)}</td>
+                  <td><span class="badge badge-success">${so.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 17. CUSTOMER RETURNS
+    customerReturns() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Customer Returns</h1>
+            <p class="text-xs text-muted">Process return claims against sales invoices</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.openCustomerReturnModal()">+ Initiate Return</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr><th>Return #</th><th>Sale Ref</th><th>Customer</th><th>Product</th><th>Qty</th><th>Reason</th><th>Action</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.customerReturns.map(cr => `
+                <tr>
+                  <td class="font-mono font-medium">${cr.id}</td>
+                  <td class="font-mono text-xs">${cr.saleRef}</td>
+                  <td>${cr.customer}</td>
+                  <td>${cr.product}</td>
+                  <td class="font-mono">${cr.qty}</td>
+                  <td><span class="badge badge-danger">${cr.reason}</span></td>
+                  <td>${cr.action}</td>
+                  <td><span class="badge badge-warning">${cr.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 18. SUPPLIER RETURNS
+    supplierReturns() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Supplier Returns</h1>
+            <p class="text-xs text-muted">Return damaged received goods back to vendors</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.toast('Initiate Supplier Return modal', 'info')">+ Record Supplier Return</button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr><th>Return #</th><th>PO Ref</th><th>Supplier</th><th>Product</th><th>Qty</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.supplierReturns.map(sr => `
+                <tr>
+                  <td class="font-mono font-medium">${sr.id}</td>
+                  <td class="font-mono text-xs">${sr.poRef}</td>
+                  <td>${sr.supplier}</td>
+                  <td>${sr.product}</td>
+                  <td class="font-mono font-bold">${sr.qty} Pcs</td>
+                  <td><span class="badge badge-accent">${sr.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 19. REPORTS
+    reports() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Analytics & Operational Reports</h1>
+            <p class="text-xs text-muted">Cross-cutting business intelligence and inventory valuation</p>
+          </div>
+        </div>
+
+        <div class="summary-grid mb-4" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="card" onclick="App.toast('Generating Inventory Valuation Report...', 'info')" style="cursor: pointer;">
+            <div class="font-semibold mb-1">Inventory Valuation</div>
+            <p class="text-xs text-muted">Stock valuation by cost vs selling price per warehouse</p>
+          </div>
+          <div class="card" onclick="App.toast('Generating Low Stock Forecast Report...', 'info')" style="cursor: pointer;">
+            <div class="font-semibold mb-1">Low Stock Forecast</div>
+            <p class="text-xs text-muted">Items nearing reorder thresholds based on sales velocity</p>
+          </div>
+          <div class="card" onclick="App.toast('Generating Daily Sales Report...', 'info')" style="cursor: pointer;">
+            <div class="font-semibold mb-1">POS & Sales Performance</div>
+            <p class="text-xs text-muted">Register sales revenue, itemized breakdown, and margins</p>
+          </div>
+          <div class="card" onclick="App.toast('Generating Vendor Purchase Analytics...', 'info')" style="cursor: pointer;">
+            <div class="font-semibold mb-1">Supplier Spend & Lead Time</div>
+            <p class="text-xs text-muted">Purchase expenditure, price variations over time</p>
+          </div>
+        </div>
+      `;
+    },
+
+    // 20. AUDIT LOGS
+    auditLogs() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">Governance & Audit Logs</h1>
+            <p class="text-xs text-muted">System-wide immutable trail of all record mutations</p>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target Entity</th><th>Previous State</th><th>New State</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.auditLogs.map(l => `
+                <tr>
+                  <td class="font-mono text-xs">${l.timestamp}</td>
+                  <td class="font-medium">${l.user}</td>
+                  <td><span class="badge badge-accent">${l.action}</span></td>
+                  <td>${l.entity}</td>
+                  <td class="font-mono text-xs text-muted">${l.oldVal}</td>
+                  <td class="font-mono text-xs font-medium">${l.newVal}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    },
+
+    // 21. USERS & RBAC PERMISSIONS MATRIX
+    users() {
+      return `
+        <div class="page-header">
+          <div>
+            <h1 class="text-2xl">User & Permission Management</h1>
+            <p class="text-xs text-muted">Employee accounts and role-based privilege matrix</p>
+          </div>
+          <button class="btn btn-primary" onclick="App.toast('New user setup modal', 'info')">+ Add User Account</button>
+        </div>
+
+        <div class="card mb-4" style="margin-bottom: 24px;">
+          <h3 class="text-base font-semibold mb-3">System Accounts</h3>
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th class="text-right">Actions</th></tr>
+            </thead>
+            <tbody>
+              ${App.db.users.map(u => `
+                <tr>
+                  <td class="font-medium">${u.name}</td>
+                  <td class="text-xs">${u.email}</td>
+                  <td><span class="badge badge-accent">${u.role}</span></td>
+                  <td><span class="badge badge-success">${u.status}</span></td>
+                  <td class="font-mono text-xs">${u.lastLogin}</td>
+                  <td class="text-right">
+                    <button class="btn btn-icon btn-sm" title="Edit Permissions"><i data-lucide="edit-2" style="width: 14px; height: 14px;"></i></button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Role Permissions Matrix Grid -->
+        <div class="card">
+          <h3 class="text-base font-semibold mb-3">RBAC Matrix Grid (Live Edit)</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Module / Functionality</th>
+                <th class="text-center">Admin</th>
+                <th class="text-center">Manager</th>
+                <th class="text-center">Warehouse Staff</th>
+                <th class="text-center">Cashier</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="font-medium">Products Master (Create/Edit)</td>
+                <td class="text-center"><input type="checkbox" checked disabled></td>
+                <td class="text-center"><input type="checkbox" checked></td>
+                <td class="text-center"><input type="checkbox"></td>
+                <td class="text-center"><input type="checkbox"></td>
+              </tr>
+              <tr>
+                <td class="font-medium">Purchase Order Approval</td>
+                <td class="text-center"><input type="checkbox" checked disabled></td>
+                <td class="text-center"><input type="checkbox" checked></td>
+                <td class="text-center"><input type="checkbox"></td>
+                <td class="text-center"><input type="checkbox"></td>
+              </tr>
+              <tr>
+                <td class="font-medium">Goods Receipt (GRN Receiving)</td>
+                <td class="text-center"><input type="checkbox" checked disabled></td>
+                <td class="text-center"><input type="checkbox" checked></td>
+                <td class="text-center"><input type="checkbox" checked></td>
+                <td class="text-center"><input type="checkbox"></td>
+              </tr>
+              <tr>
+                <td class="font-medium">POS Terminal Sales Execution</td>
+                <td class="text-center"><input type="checkbox" checked disabled></td>
+                <td class="text-center"><input type="checkbox" checked></td>
+                <td class="text-center"><input type="checkbox"></td>
+                <td class="text-center"><input type="checkbox" checked></td>
+              </tr>
+              <tr>
+                <td class="font-medium">System Audit Logs & Governance</td>
+                <td class="text-center"><input type="checkbox" checked disabled></td>
+                <td class="text-center"><input type="checkbox"></td>
+                <td class="text-center"><input type="checkbox"></td>
+                <td class="text-center"><input type="checkbox"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  },
+
+  // -------------------------------------------------------------
+  // POS CART ACTIONS
+  // -------------------------------------------------------------
+  posCart: [],
+
+  addToPosCart(prodId) {
+    const p = this.db.products.find(x => x.id === prodId);
+    if (!p) return;
+    
+    const existing = this.posCart.find(i => i.id === prodId);
+    if (existing) {
+      existing.qty += 1;
+    } else {
+      this.posCart.push({ id: p.id, name: p.name, price: p.sellingPrice, qty: 1 });
+    }
+    this.renderPosCart();
+  },
+
+  renderPosCart() {
+    const linesContainer = document.getElementById('pos-cart-lines');
+    if (this.posCart.length === 0) {
+      linesContainer.innerHTML = `<div class="text-center text-muted p-4" id="empty-cart-msg">Scan products or click items to add to checkout</div>`;
+      document.getElementById('pos-subtotal').textContent = 'Rs. 0';
+      document.getElementById('pos-total').textContent = 'Rs. 0';
+      return;
+    }
+
+    let subtotal = 0;
+    let html = '<table class="data-table" style="font-size: 12px;">';
+    this.posCart.forEach(item => {
+      const total = item.price * item.qty;
+      subtotal += total;
+      html += `
+        <tr>
+          <td>
+            <div class="font-medium">${item.name}</div>
+            <div class="text-xs text-muted font-mono">${App.formatCurrency(item.price)}</div>
+          </td>
+          <td>
+            <div class="flex items-center gap-1">
+              <button class="btn btn-secondary btn-sm" onclick="App.updatePosQty('${item.id}', -1)" style="padding: 1px 6px;">-</button>
+              <span class="font-mono font-bold" style="padding: 0 4px;">${item.qty}</span>
+              <button class="btn btn-secondary btn-sm" onclick="App.updatePosQty('${item.id}', 1)" style="padding: 1px 6px;">+</button>
+            </div>
+          </td>
+          <td class="text-right font-mono font-bold">${App.formatCurrency(total)}</td>
+        </tr>
+      `;
+    });
+    html += '</table>';
+    linesContainer.innerHTML = html;
+
+    document.getElementById('pos-subtotal').textContent = App.formatCurrency(subtotal);
+    document.getElementById('pos-total').textContent = App.formatCurrency(subtotal);
+  },
+
+  updatePosQty(prodId, delta) {
+    const item = this.posCart.find(i => i.id === prodId);
+    if (!item) return;
+    item.qty += delta;
+    if (item.qty <= 0) {
+      this.posCart = this.posCart.filter(i => i.id !== prodId);
+    }
+    this.renderPosCart();
+  },
+
+  calcPosChange(cashVal) {
+    const total = this.posCart.reduce((a, b) => a + (b.price * b.qty), 0);
+    const cash = Number(cashVal) || 0;
+    const change = cash - total;
+    document.getElementById('pos-change-due').textContent = App.formatCurrency(change > 0 ? change : 0);
+  },
+
+  completePosSale(method) {
+    if (this.posCart.length === 0) {
+      this.toast('Cart is empty. Add products to checkout.', 'warning');
+      return;
+    }
+    
+    const total = this.posCart.reduce((a, b) => a + (b.price * b.qty), 0);
+    const saleId = 'S-' + Math.floor(Math.random()*9000 + 1000);
+    
+    // Deduct stock & create transactions
+    this.posCart.forEach(item => {
+      const p = this.db.products.find(x => x.id === item.id);
+      if (p && p.stock['WH-1']) {
+        p.stock['WH-1'] = Math.max(0, p.stock['WH-1'] - item.qty);
+      }
+      this.db.transactions.unshift({
+        id: 'TX-' + Math.floor(Math.random()*9000 + 1000),
+        date: '2026-08-05 01:32',
+        product: item.name,
+        type: 'Sale',
+        qty: -item.qty,
+        warehouse: 'Main Warehouse',
+        reference: saleId,
+        user: this.currentUser.name
+      });
+    });
+
+    this.toast(`Sale ${saleId} completed via ${method}! Total: ${App.formatCurrency(total)}`, 'success');
+    this.posCart = [];
+    this.renderPosCart();
+  },
+
+  // -------------------------------------------------------------
+  // OTHER WORKFLOW EXECUTION HELPERS
+  // -------------------------------------------------------------
+  switchTab(tabId, btnElement) {
+    const parent = btnElement.closest('.card');
+    parent.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    parent.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+    
+    btnElement.classList.add('active');
+    document.getElementById(tabId).style.display = 'block';
+  },
+
+  executeGRNConfirmation() {
+    const recvQty = Number(document.getElementById('grn-recv-qty').value) || 0;
+    const dmgQty = Number(document.getElementById('grn-dmg-qty').value) || 0;
+    const accQty = recvQty - dmgQty;
+    const whId = document.getElementById('grn-wh-select').value;
+
+    const p = this.db.products.find(x => x.id === 'P-101');
+    if (p) {
+      p.stock[whId] = (p.stock[whId] || 0) + accQty;
+      this.db.transactions.unshift({
+        id: 'TX-' + Math.floor(Math.random()*9000 + 1000),
+        date: '2026-08-05 01:32',
+        product: p.name,
+        type: 'Purchase',
+        qty: +accQty,
+        warehouse: whId === 'WH-1' ? 'Main Warehouse' : 'Branch Warehouse',
+        reference: 'GRN-502',
+        user: this.currentUser.name
+      });
+    }
+
+    this.toast(`GRN Confirmed! Added ${accQty} units to inventory ledger.`, 'success');
+    this.navigate('goods-receipts');
+  },
+
+  approvePR(prId) {
+    const pr = this.db.purchaseRequests.find(x => x.id === prId);
+    if (pr) {
+      pr.status = 'Approved';
+      this.toast(`Purchase Request ${prId} approved!`, 'success');
+      this.navigate('purchase-requests');
+    }
+  },
+
+  openCreateProductDrawer() {
+    this.openDrawer('Create Master Product Record', `
+      <div class="flex flex-col gap-3">
+        <div class="form-group">
+          <label class="form-label">Product Name</label>
+          <input type="text" class="form-control" placeholder="e.g. Dell Wireless Mouse">
+        </div>
+        <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">SKU</label>
+            <input type="text" class="form-control font-mono" placeholder="MSE-DELL-W1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Barcode</label>
+            <input type="text" class="form-control font-mono" placeholder="890123456799">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">Cost Price (LKR)</label>
+            <input type="number" class="form-control font-mono" placeholder="1200">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Selling Price (LKR)</label>
+            <input type="number" class="form-control font-mono" placeholder="1850">
+          </div>
+        </div>
+        <button class="btn btn-primary w-full mt-3" style="margin-top: 12px;" onclick="App.toast('New product record created', 'success'); App.closeDrawer();">Save Product</button>
+      </div>
+    `);
+  },
+
+  openEditProductDrawer(id) {
+    const p = this.db.products.find(x => x.id === id);
+    this.openDrawer(`Edit Master Product (${p.sku})`, `
+      <div class="flex flex-col gap-3">
+        <div class="form-group">
+          <label class="form-label">Product Name</label>
+          <input type="text" class="form-control" value="${p.name}">
+        </div>
+        <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">Cost Price (LKR)</label>
+            <input type="number" class="form-control font-mono" value="${p.costPrice}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Selling Price (LKR)</label>
+            <input type="number" class="form-control font-mono" value="${p.sellingPrice}">
+          </div>
+        </div>
+        <button class="btn btn-primary w-full mt-3" onclick="App.toast('Product changes saved to master database', 'success'); App.closeDrawer();">Update Product</button>
+      </div>
+    `);
+  },
+
+  openStockTransferModal() {
+    this.openModal('Initiate Inter-Warehouse Transfer', `
+      <div class="flex flex-col gap-3">
+        <div class="form-group">
+          <label class="form-label">Product</label>
+          <select class="form-control form-select">
+            ${this.db.products.map(p => `<option>${p.name} (${p.sku})</option>`).join('')}
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">From Warehouse</label>
+            <select class="form-control form-select"><option>Main Warehouse</option></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">To Warehouse</label>
+            <select class="form-control form-select"><option>Branch Warehouse</option></select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Transfer Quantity</label>
+          <input type="number" class="form-control font-mono" value="10">
+        </div>
+      </div>
+    `, () => {
+      this.toast('Stock Transfer ST-802 initiated in In Transit state', 'success');
+      this.navigate('stock-transfers');
+    });
+  },
+
+  openStockAdjustmentModal() {
+    this.openModal('Record Manual Stock Adjustment', `
+      <div class="flex flex-col gap-3">
+        <div class="form-group">
+          <label class="form-label">Select Product</label>
+          <select class="form-control form-select">
+            ${this.db.products.map(p => `<option>${p.name} (${p.sku})</option>`).join('')}
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-group">
+            <label class="form-label">Adjustment Qty (±)</label>
+            <input type="number" class="form-control font-mono" placeholder="-5">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reason</label>
+            <select class="form-control form-select">
+              <option>Damage</option>
+              <option>Loss / Theft</option>
+              <option>Counting Correction</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    `, () => {
+      this.toast('Stock adjustment recorded & Audit Log entry generated', 'warning');
+      this.navigate('stock-adjustments');
+    });
+  }
+};
+
+// Initialize App on DOM Content Loaded
+document.addEventListener('DOMContentLoaded', () => {
+  App.init();
+});
+</script>
+
+</body>
+</html>
