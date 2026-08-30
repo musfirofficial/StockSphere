@@ -25,6 +25,7 @@ from app.routes.v1.stockalert import router as stockalert_router
 async def lifespan(_app: FastAPI):
     # Startup
     await create_db_and_tables()
+    yield
     # Shutdown
     await engine.dispose()
     # await Post.metadata.drop_all(bind=engine) #!DANGER! This will delete the entire database on shutdown, use with caution!

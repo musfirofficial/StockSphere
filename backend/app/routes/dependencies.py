@@ -39,8 +39,8 @@ oauth2_scheme = OAuth2PasswordBearer(
 )  # This where users get token if they dont have one
 
 
-async def login_validate_user(db: AsyncSession, user_name: str, password: str) -> User:
-    result = await user_crud.get_user_by_user_name(db, user_name=user_name)
+async def login_validate_user(db: AsyncSession, identifier: str, password: str) -> User:
+    result = await user_crud.get_user_by_email_or_username(db, identifier=identifier)
     if not result:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not verify_password(password, result.password_hash):

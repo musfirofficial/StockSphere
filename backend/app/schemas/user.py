@@ -9,11 +9,11 @@ from app.models import UserRole
 class UserBase(BaseModel):
     full_name: str = Field(min_length=3, max_length=100)
     user_name: str = Field(min_length=3, max_length=50)
-    nic: str = Field(min_length = 10, max_length = 12)
-    email: EmailStr = Field (max_length = 100)
-    phone: str = Field( max_length=12)
+    nic: str = Field(min_length=10, max_length=12)
+    email: EmailStr = Field(max_length=100)
+    phone: str = Field(min_length=10, max_length=15)
 
-    @field_validator('full_name','user_name', 'email', 'phone', 'nic')
+    @field_validator('full_name', 'user_name', 'email', 'phone', 'nic')
     @classmethod
     def clean_input(cls, v: str, info) -> str:
         v = v.strip()
@@ -26,21 +26,21 @@ class UserBase(BaseModel):
                 raise ValueError("Username can only contain lowercase letters, numbers, periods(.), and underscores(_)")
         elif info.field_name == 'nic':
             v = v.upper()
-            if not re.match(r"^(\d{9}V|\d{12})$", v):
-                raise ValueError("Invalid NIC format")
+            if not re.match(r"^(\d{9}[VvXx]|\d{12})$", v):
+                raise ValueError("Invalid NIC format (must be 9 digits followed by V/X or 12 digits)")
         elif info.field_name == 'email':
             v = v.lower()
             if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
                 raise ValueError("Invalid email address format (e.g. user@example.com)")
         elif info.field_name == 'phone':
-            v = v.strip()
-            if not re.match(r"^\d{3} \d{3} \d{4}$", v):
-                raise ValueError("Phone number must be in the format ### ### ####")
+            v = v.strip().replace(" ", "").replace("-", "")
+            if not re.match(r"^0\d{9}$", v):
+                raise ValueError("Phone number must be 10 digits starting with 0 (e.g. 0771234567)")
         return v
 
 # ---------------------------- User create Schema ---------------------------- #
 class UserCreate(UserBase):
-    password: str = Field(min_length=8, max_length=72) # !!! Need to be Hashed
+    password: str = Field(min_length=8, max_length=72)  # !!! Need to be Hashed
     role: Optional[UserRole] = UserRole.SALES
 
     @field_validator('password')
@@ -60,7 +60,7 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
 
-    @field_validator('user_name', 'nic', 'email','phone', 'full_name')
+    @field_validator('user_name', 'nic', 'email', 'phone', 'full_name')
     @classmethod
     def validate_updates(cls, v, info):
         if v is None:
@@ -74,17 +74,50 @@ class UserUpdate(BaseModel):
                 raise ValueError("Username can only contain lowercase letters, numbers, periods(.), and underscores(_)")        
         if info.field_name == 'nic':
             v = v.upper()
-            if not re.match(r"^(\d{9}V|\d{12})$", v):
-                raise ValueError("Invalid NIC format")        
+            if not re.match(r"^(\d{9}[VvXx]|\d{12})$", v):
+                raise ValueError("Invalid NIC format (must be 9 digits followed by V/X or 12 digits)")        
         if info.field_name == 'phone':
-            if not re.match(r"^\d{3} \d{3} \d{4}$", v):
-                raise ValueError("Phone number must be in the format ### ### ####")                  
+            v = v.strip().replace(" ", "").replace("-", "")
+            if not re.match(r"^0\d{9}$", v):
+                raise ValueError("Phone number must be 10 digits starting with 0 (e.g. 0771234567)")                  
         return v
 
 # -------------------------- Password change schema -------------------------- #
 class ChangePasswordRequest(BaseModel):
-    current_password: str | None = Field(default = None, min_length=8, max_length=72)
+    current_password: str | None = Field(default=None, min_length=8, max_length=72)
     new_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if " " in v:
+            raise ValueError("Password cannot contain spaces")
+        return v
+
+# ---------------------- Password recovery via email schemas ---------------------- #
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def clean_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+class ResetPasswordConfirm(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def clean_password(cls, v: str) -> str:
+        if " " in v:
+            raise ValueError("Password cannot contain spaces")
+        return v
+
+# --------------------------- Login request schema --------------------------- #
+class LoginRequest(BaseModel):
+    identifier: str = Field(min_length=3, max_length=100)  # email or username
+    password: str = Field(min_length=1, max_length=72)
 
 # --------------------------- User response schema --------------------------- #
 class UserResponse(UserBase):
@@ -94,5 +127,4 @@ class UserResponse(UserBase):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True) # It allows Pydantic to read data from SQLAlchemy objects
-
+    model_config = ConfigDict(from_attributes=True)  # It allows Pydantic to read data from SQLAlchemy objects

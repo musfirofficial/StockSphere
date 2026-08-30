@@ -17,8 +17,6 @@ import {
   ChevronRight,
   ChevronLeft,
   Menu,
-  Sun,
-  Moon,
   X,
   ArrowLeftRight,
   Bell,
@@ -392,50 +390,6 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
             <div
               style={{ height: 1, background: c.border, margin: "8px 4px" }}
             />
-            {/* Theme toggler */}
-            <button
-              onClick={toggleTheme}
-              title={
-                collapsed && !isMobile
-                  ? mode === "light"
-                    ? "Dark mode"
-                    : "Light mode"
-                  : undefined
-              }
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11,
-                width: "100%",
-                padding: collapsed && !isMobile ? "9px 0" : "9px 12px",
-                justifyContent:
-                  collapsed && !isMobile ? "center" : "flex-start",
-                borderRadius: 9,
-                border: "none",
-                cursor: "pointer",
-                background: "transparent",
-                color: c.textMuted,
-                fontSize: 13.5,
-                fontWeight: 500,
-                fontFamily: "inherit",
-                transition: "background .12s,color .12s",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = c.surfaceMuted;
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-              }}
-            >
-              {mode === "light" ? (
-                <Moon size={17} strokeWidth={2} style={{ flexShrink: 0 }} />
-              ) : (
-                <Sun size={17} strokeWidth={2} style={{ flexShrink: 0 }} />
-              )}
-              {(!collapsed || isMobile) && (
-                <span>{mode === "light" ? "Dark mode" : "Light mode"}</span>
-              )}
-            </button>
             {NAV_BOTTOM.map((item) => (
               <NavItem
                 key={item.key}

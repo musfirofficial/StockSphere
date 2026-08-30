@@ -2,39 +2,24 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, Lock, User, Eye, EyeOff } from "lucide-react";
+import { Lock, User, Eye, EyeOff } from "lucide-react";
 
-const theme = {
-  light: {
-    bg: "#FAFAF8",
-    surface: "#FFFFFF",
-    border: "#E7E5DF",
-    text: "#1A1A18",
-    textMuted: "#6B6A63",
-    accent: "#3B6E5E",
-    accentHover: "#2E574A",
-    accentSoft: "#E7F0EC",
-    error: "#B3473C",
-    inputBg: "#F5F4F0",
-  },
-  dark: {
-    bg: "#15140F",
-    surface: "#1D1C16",
-    border: "#322F27",
-    text: "#F2F1EA",
-    textMuted: "#A8A597",
-    accent: "#6FAE97",
-    accentHover: "#5B9680",
-    accentSoft: "#22302A",
-    error: "#E08374",
-    inputBg: "#252420",
-  },
+const c = {
+  bg: "#FAFAF8",
+  surface: "#FFFFFF",
+  border: "#E7E5DF",
+  text: "#1A1A18",
+  textMuted: "#6B6A63",
+  accent: "#3B6E5E",
+  accentHover: "#2E574A",
+  accentSoft: "#E7F0EC",
+  error: "#B3473C",
+  inputBg: "#F5F4F0",
 };
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"light" | "dark">("light");
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -43,31 +28,16 @@ export default function LoginPage() {
 
   useEffect(() => {
     setIsMounted(true);
-    // Load theme from localStorage if available
-    const savedMode = localStorage.getItem("theme-mode") as "light" | "dark";
-    if (savedMode) {
-      setMode(savedMode);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setMode("dark");
-    }
-
-    // sessionStorage is per-tab, so this only matters within the same tab session
     if (sessionStorage.getItem("isLoggedIn") === "true") {
       router.push("/dashboard");
     }
   }, [router]);
 
-  const toggleTheme = () => {
-    const nextMode = mode === "light" ? "dark" : "light";
-    setMode(nextMode);
-    localStorage.setItem("theme-mode", nextMode);
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    if (!username.trim() || !password.trim()) {
+    if (!identifier.trim() || !password.trim()) {
       setError("Please fill in all fields.");
       return;
     }
@@ -75,36 +45,34 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // 1. Prepare form data
-      const formData = new URLSearchParams();
-      formData.append("username", username.trim());
-      formData.append("password", password);
-
-      // 2. Call your FastAPI backend endpoint
       const response = await fetch("http://localhost:8000/auth/login", {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/json",
         },
-        body: formData,
+        body: JSON.stringify({
+          identifier: identifier.trim(),
+          password: password,
+        }),
       });
 
       const data = await response.json();
 
-      // 3. Handle unsuccessful login
       if (!response.ok) {
         const errorMessage =
           typeof data.detail === "string"
             ? data.detail
-            : data.detail?.[0]?.msg || "Login failed. Please try again.";
+            : data.detail?.[0]?.msg || "Login failed. Please check your credentials.";
         setError(errorMessage);
         return;
       }
 
-      // 4. sessionStorage instead of localStorage — cleared on tab/browser close
       sessionStorage.setItem("access_token", data.access_token);
       sessionStorage.setItem("refresh_token", data.refresh_token);
       sessionStorage.setItem("isLoggedIn", "true");
+
+      localStorage.setItem("access_token", data.access_token);
+      localStorage.setItem("refresh_token", data.refresh_token);
 
       try {
         const payloadBase64 = data.access_token.split(".")[1];
@@ -115,18 +83,20 @@ export default function LoginPage() {
             userId: decodedPayload.sub,
             fullName: decodedPayload.full_name,
             role: decodedPayload.role,
-            username: username.trim().toLowerCase(),
+            username: decodedPayload.user_name || identifier.trim().toLowerCase(),
           })
         );
+        localStorage.setItem("user_role", decodedPayload.role || "Admin");
+        localStorage.setItem("username", decodedPayload.user_name || identifier.trim().toLowerCase());
+        localStorage.setItem("user_full_name", decodedPayload.full_name || "");
       } catch {
-        // Fallback if payload decoding fails
         sessionStorage.setItem(
           "user",
-          JSON.stringify({ username: username.toLowerCase() })
+          JSON.stringify({ username: identifier.toLowerCase() })
         );
       }
 
-      // 5. Pre-fetch dashboard data so the dashboard page loads instantly
+      // Pre-fetch dashboard data
       try {
         const dashRes = await fetch("http://localhost:8000/dashboard/", {
           headers: {
@@ -139,21 +109,18 @@ export default function LoginPage() {
           sessionStorage.setItem("dashboardData", JSON.stringify(dashData));
         }
       } catch {
-        // Non-fatal: dashboard will re-fetch on its own if this fails
+        // Non-fatal
       }
 
-      // 6. Redirect to dashboard
       router.push("/dashboard");
     } catch (err) {
-      setError("Unable to connect to the server.");
+      setError("Unable to connect to the server. Please check your connection.");
     } finally {
       setLoading(false);
     }
   };
 
   if (!isMounted) return null;
-
-  const c = theme[mode];
 
   return (
     <div
@@ -166,29 +133,9 @@ export default function LoginPage() {
         alignItems: "center",
         justifyContent: "center",
         position: "relative",
-        transition: "background 0.2s, color 0.2s",
         padding: 20,
       }}
     >
-      {/* Theme toggle */}
-      <button
-        onClick={toggleTheme}
-        style={{
-          position: "absolute",
-          top: 20,
-          right: 20,
-          background: c.surface,
-          border: `1px solid ${c.border}`,
-          borderRadius: 8,
-          padding: "6px 10px",
-          cursor: "pointer",
-          color: c.textMuted,
-          fontSize: 13,
-        }}
-      >
-        {mode === "light" ? "🌙 Dark" : "☀️ Light"}
-      </button>
-
       {/* Main card */}
       <div
         style={{
@@ -198,10 +145,7 @@ export default function LoginPage() {
           border: `1px solid ${c.border}`,
           borderRadius: 16,
           padding: "40px 32px",
-          boxShadow:
-            mode === "light"
-              ? "0 4px 20px -2px rgba(107, 106, 99, 0.08), 0 2px 8px -1px rgba(107, 106, 99, 0.04)"
-              : "0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 2px 8px -1px rgba(0, 0, 0, 0.3)",
+          boxShadow: "0 4px 20px -2px rgba(107, 106, 99, 0.08), 0 2px 8px -1px rgba(107, 106, 99, 0.04)",
         }}
       >
         {/* Brand/Logo */}
@@ -251,7 +195,7 @@ export default function LoginPage() {
               style={{
                 padding: "10px 14px",
                 borderRadius: 8,
-                background: mode === "light" ? "#FCECEB" : "#372120",
+                background: "#FCECEB",
                 color: c.error,
                 fontSize: 13,
                 fontWeight: 500,
@@ -262,10 +206,10 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Username Field */}
+          {/* Identifier Field (Email or Username) */}
           <div>
             <label
-              htmlFor="username"
+              htmlFor="identifier"
               style={{
                 display: "block",
                 fontSize: 12.5,
@@ -274,7 +218,7 @@ export default function LoginPage() {
                 marginBottom: 6,
               }}
             >
-              Username
+              Email or Username
             </label>
             <div style={{ position: "relative" }}>
               <span
@@ -291,11 +235,11 @@ export default function LoginPage() {
                 <User size={16} />
               </span>
               <input
-                id="username"
+                id="identifier"
                 type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="admin or user@stocksphere.com"
                 style={{
                   width: "100%",
                   padding: "11px 12px 11px 38px",
@@ -305,6 +249,7 @@ export default function LoginPage() {
                   color: c.text,
                   fontSize: 14,
                   outline: "none",
+                  boxSizing: "border-box",
                 }}
               />
             </div>
@@ -312,18 +257,37 @@ export default function LoginPage() {
 
           {/* Password Field */}
           <div>
-            <label
-              htmlFor="password"
+            <div
               style={{
-                display: "block",
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: c.textMuted,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
                 marginBottom: 6,
               }}
             >
-              Password
-            </label>
+              <label
+                htmlFor="password"
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: c.textMuted,
+                }}
+              >
+                Password
+              </label>
+              <a
+                href="/forgot-password"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: c.accent,
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Forgot password?
+              </a>
+            </div>
             <div style={{ position: "relative" }}>
               <span
                 style={{
@@ -353,6 +317,7 @@ export default function LoginPage() {
                   color: c.text,
                   fontSize: 14,
                   outline: "none",
+                  boxSizing: "border-box",
                 }}
               />
               <button
@@ -402,8 +367,6 @@ export default function LoginPage() {
           </button>
         </form>
       </div>
-
-      {/* Helper text removed */}
     </div>
   );
 }

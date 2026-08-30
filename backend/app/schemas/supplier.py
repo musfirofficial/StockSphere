@@ -26,8 +26,9 @@ class SupplierBase(BaseModel):
             if not re.match(r"^[a-zA-Z\s]+$", v):
                 raise ValueError("Supplier name can only contain letters and spaces")
         elif info.field_name == "phone":
-            if not re.match(r"^\d{3} \d{3} \d{4}$", v):
-                raise ValueError("Phone number must be in the format ### ### ####")
+            v = v.strip().replace(" ", "").replace("-", "")
+            if not re.match(r"^0\d{9}$", v):
+                raise ValueError("Phone number must be 10 digits starting with 0 (e.g. 0771234567)")
         return v
 
 
@@ -58,8 +59,9 @@ class SupplierUpdate(BaseModel):
             if not re.match(r"^[a-zA-Z\s]+$", v):
                 raise ValueError("Supplier name can only contain letters and spaces")
         elif info.field_name == "phone":
-            if not re.match(r"^\d{3} \d{3} \d{4}$", v):
-                raise ValueError("Phone number must be in the format ### ### ####")
+            v = v.strip().replace(" ", "").replace("-", "")
+            if not re.match(r"^0\d{9}$", v):
+                raise ValueError("Phone number must be 10 digits starting with 0 (e.g. 0771234567)")
         return v
 
 

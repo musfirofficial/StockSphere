@@ -38,15 +38,7 @@ async def client(mock_session):
     app.dependency_overrides[get_async_session] = _override_session
 
     # 2. Patch lifespan internals so startup doesn't need a real DB
-    with (
-        patch("app.app.create_db_and_tables",          new_callable=AsyncMock),
-        patch("app.app.AdminService.create_admin",     new_callable=AsyncMock, return_value="exists"),
-        patch("app.app.async_session_maker") as mock_maker,
-    ):
-        # The lifespan does `async with async_session_maker() as session:`
-        # so we need to mock the context manager it returns
-        mock_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_maker.return_value.__aexit__  = AsyncMock(return_value=False)
+    with patch("app.app.create_db_and_tables", new_callable=AsyncMock):
 
         async with AsyncClient(
             transport=ASGITransport(app=app),

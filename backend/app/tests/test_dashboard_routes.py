@@ -298,11 +298,12 @@ async def test_dashboard_zero_sales_fallback(client):
         f"{crud_prefix}.get_draft_po_count"         : AsyncMock(return_value=0),
     }
 
-    with (
-        patch(jwt_decode, return_value={"sub": str(admin.user_id)}),
-        patch(get_user, new_callable=AsyncMock, return_value=admin),
-        *[patch(k, new=v) for k, v in patches.items()],
-    ):
+    with ExitStack() as stack:
+        stack.enter_context(patch(jwt_decode, return_value={"sub": str(admin.user_id)}))
+        stack.enter_context(patch(get_user, new_callable=AsyncMock, return_value=admin))
+        for k, v in patches.items():
+            stack.enter_context(patch(k, new=v))
+
         response = await client.get(
             "/dashboard/",
             headers={"Authorization": "Bearer faketoken"},

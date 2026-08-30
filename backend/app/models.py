@@ -12,9 +12,9 @@ from sqlalchemy import (
     Enum,
     Numeric,
     Index,
+    Uuid as UUID,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
 # -------------------------- Setting local timezone -------------------------- #
@@ -135,6 +135,9 @@ class User(Base):
     )
     auditlogs: Mapped[list["AuditLog"]] = relationship(
         "AuditLog", back_populates="user", passive_deletes=True
+    )
+    password_reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
+        "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )
 
     # back_populates use to sync both relationships, so we can access user from report and report from user
@@ -488,3 +491,26 @@ class PurchaseOrderItem(Base):
         "PurchaseOrder", back_populates="purchaseorderitems"
     )
     item: Mapped["Item"] = relationship("Item", back_populates="purchaseorderitems")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    token_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_used: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="password_reset_tokens")

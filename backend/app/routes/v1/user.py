@@ -15,7 +15,7 @@ import uuid
 router = APIRouter(prefix="/users", tags=["users"])
 
 load_dotenv()
-RECOVARY_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+RECOVARY_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "adminhomerex")
 
 
 # -------------------- New user create endpoint (Admin Only) -------------------- #
