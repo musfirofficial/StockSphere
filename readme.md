@@ -48,8 +48,6 @@ StockSphere is a centralized operations platform that synchronizes physical inve
 
 ![alt text](image.png)
 
-![StockSphere Dashboard Screenshot](docs/screenshot.png)
-
 _The user interface employs a minimal, high-density design system built with CSS variables, fast responsive tables, and dedicated full-page transaction recording workflows._
 
 ---
