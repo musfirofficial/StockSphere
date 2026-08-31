@@ -1,9 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from typing import Sequence
 from app.schemas.item import ItemCreate
-from app.models import Item, StockAlert, AlertStatus
+from app.models import Item, ItemSupplier, StockBatch, StockAlert, AlertStatus
 import uuid
 
 
@@ -21,13 +21,18 @@ async def create_item(db: AsyncSession, item_in: ItemCreate) -> Item:
 async def get_all_items(db: AsyncSession) -> Sequence[Item]:
     result = await db.execute(
         select(Item)
-        .options(joinedload(Item.category), joinedload(Item.supplier))
+        .options(
+            joinedload(Item.category),
+            joinedload(Item.unit_rel),
+            selectinload(Item.item_suppliers).joinedload(ItemSupplier.supplier),
+            selectinload(Item.stock_batches),
+        )
         .order_by(Item.item_name.asc())
     )
-    return result.scalars().all()
+    return result.unique().scalars().all()
 
 
-# ----------------------- crud for update esisting item ---------------------- #
+# ----------------------- crud for update existing item ---------------------- #
 async def update_item(db: AsyncSession, db_item: Item, update_data: dict):
     # 1. Apply the raw dict updates directly to the database object
     for field, value in update_data.items():
@@ -54,10 +59,15 @@ async def delete_item(db: AsyncSession, item_id: uuid.UUID) -> None:
 async def get_item_by_item_id(db: AsyncSession, item_id: uuid.UUID) -> Item | None:
     result = await db.execute(
         select(Item)
-        .options(joinedload(Item.category), joinedload(Item.supplier))
+        .options(
+            joinedload(Item.category),
+            joinedload(Item.unit_rel),
+            selectinload(Item.item_suppliers).joinedload(ItemSupplier.supplier),
+            selectinload(Item.stock_batches),
+        )
         .where(Item.item_id == item_id)
     )
-    return result.scalar_one_or_none()
+    return result.unique().scalar_one_or_none()
 
 
 # ------------------- Get items with low stock alert for PO ------------------ #

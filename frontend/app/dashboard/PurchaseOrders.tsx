@@ -2,13 +2,34 @@
 
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
-  Plus, Search, ChevronLeft, ChevronRight, X, Check, ArrowLeft, Save, Sparkles, FileText, Trash2
+  Plus,
+  Search,
+  X,
+  Check,
+  Building2,
+  FileText,
+  Trash2,
+  Filter,
+  Download,
+  AlertCircle,
+  Clock,
+  CheckCircle,
+  XCircle,
+  ArrowLeft,
+  Package,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { ConfirmDeleteModal, Pagination, DataTable } from "@/components/ui";
-
+import { Pagination } from "@/components/ui";
 
 // ── Types ──────────────────────────────────────────────────
+export type POStatus =
+  | "Draft"
+  | "Pending Approval"
+  | "Approved"
+  | "Partially Received"
+  | "Completed"
+  | "Cancelled";
+
 interface Supplier {
   id: string;
   supplierName: string;
@@ -17,1277 +38,1036 @@ interface Supplier {
   email: string;
   address: string;
   active: boolean;
-  createdAt: string;
-  updatedAt: string;
-  notes: string;
-  totalSupplies: number;
 }
 
-interface POItem {
-  poiId: string;
-  no: number;
-  itemId: string;
-  itemName: string;
+interface POItemResponse {
+  poi_id: string;
+  po_id: string;
+  item_id: string;
+  item_name: string;
+  sku: string;
+  unit: string;
   quantity: number;
-  unitPrice: number;
-  total: number;
-  isStaleAlert?: boolean;
+  quantity_received: number;
+  unit_price: number;
+  total_price: number;
 }
 
 interface PurchaseOrder {
-  id: string;
-  supplierId: string;
-  supplierName: string;
-  poType: "Draft" | "Generated";
-  createdBy?: string;
-  items: POItem[];
-  createdAt: string;
-  updatedAt: string;
-  netTotal: number;
+  po_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  status: POStatus;
+  notes?: string | null;
+  created_at: string;
+  created_by?: string | null;
+  total_items: number;
+  total_amount: number;
+  items: POItemResponse[];
 }
 
-interface ItemOption {
-  id: string;
-  name: string;
-  supplierId: string;
-  defaultPrice: number;
-  isActive: boolean;
+interface SupplierItemOption {
+  item_id: string;
+  item_name: string;
+  sku: string;
+  unit: string;
+  agreed_price: number;
+  is_primary: boolean;
 }
 
 interface PurchaseOrdersProps {
-  c: any; // Theme colors
+  c: any;
   supplierList: Supplier[];
 }
 
+// ── Minimal Status Indicator ───────────────────────────────
+function POStatusIndicator({ status }: { status: POStatus }) {
+  const map: Record<POStatus, { color: string; label: string }> = {
+    Draft: { color: "#64748B", label: "Draft" },
+    "Pending Approval": { color: "#D97706", label: "Pending Approval" },
+    Approved: { color: "#2563EB", label: "Approved" },
+    "Partially Received": { color: "#7C3AED", label: "Partially Received" },
+    Completed: { color: "#2E7D32", label: "Completed" },
+    Cancelled: { color: "#DC2626", label: "Cancelled" },
+  };
+  const s = map[status] || { color: "#64748B", label: status };
+
+  return (
+    <span
+      style={{
+        fontSize: 12.5,
+        fontWeight: 500,
+        color: s.color,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.color }} />
+      {s.label}
+    </span>
+  );
+}
+
+// ============================================================================
+// Main Purchase Orders Component
+// ============================================================================
 export default function PurchaseOrders({ c, supplierList }: PurchaseOrdersProps) {
-  // ── States ────────────────────────────────────────────────
-  const [poList, setPoList] = useState<PurchaseOrder[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [supplierFilter, setSupplierFilter] = useState<string>("ALL");
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [supplierMenuOpen, setSupplierMenuOpen] = useState(false);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"All" | "Draft" | "Generated">("All");
-  const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
-  const [itemSearchQuery, setItemSearchQuery] = useState("");
-
-  // Active items fetched for current supplier
-  const [supplierItems, setSupplierItems] = useState<ItemOption[]>([]);
-  const [loadingPOItems, setLoadingPOItems] = useState(false);
-  const [savingPO, setSavingPO] = useState(false);
-  const [generatingPO, setGeneratingPO] = useState(false);
-
-  // Selection / Flow States
+  // Dedicated Full-Page PO View
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
-  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
-  const [isEditingPO, setIsEditingPO] = useState(false);
-  const [supplierSelectOpen, setSupplierSelectOpen] = useState(false);
-  const [smartScanLoading, setSmartScanLoading] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
+
+  // Create PO Modal State
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [availableItems, setAvailableItems] = useState<SupplierItemOption[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [orderItems, setOrderItems] = useState<{ [itemId: string]: { selected: boolean; quantity: number } }>({});
+  const [poNotes, setPoNotes] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // Pagination
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 8;
+  const PAGE_SIZE = 10;
 
-  // ── Helpers for Excel Table Adding Items ──────────────────
-  const [addItemDropdownOpen, setAddItemDropdownOpen] = useState(false);
-
-  // Trigger Toast Notification
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(""), 4000);
-  };
-
-  // Fetch Purchase Orders from backend
-  const fetchPurchaseOrders = useCallback(async () => {
+  // Fetch all purchase orders
+  const loadPurchaseOrders = useCallback(async () => {
+    setLoading(true);
     try {
-      const data = await apiFetch<any[]>("/purchas-orders/");
-      const mapped: PurchaseOrder[] = data.map((po: any) => ({
-        id: po.po_id,
-        supplierId: po.supplier_id,
-        supplierName: po.supplier_name || "Unknown Supplier",
-        poType: po.po_type,
-        createdBy: po.created_by || "System",
-        createdAt: po.created_at ? new Date(po.created_at).toLocaleString() : "",
-        updatedAt: po.created_at ? new Date(po.created_at).toLocaleString() : "",
-        items: [],
-        netTotal: 0
-      }));
-      setPoList(mapped);
-    } catch (err: any) {
-      console.error("Failed to fetch purchase orders:", err);
+      const data = await apiFetch<PurchaseOrder[]>("/purchas-orders/");
+      setOrders(data || []);
+    } catch (err) {
+      setOrders([]);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchPurchaseOrders();
-  }, [fetchPurchaseOrders]);
+    loadPurchaseOrders();
+  }, [loadPurchaseOrders]);
 
-  // Filter and Search POs
-  const filteredPOList = useMemo(() => {
-    return poList.filter(po => {
-      const matchesSearch = po.supplierName.toLowerCase().includes(searchQuery.toLowerCase()) || po.id.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesType = typeFilter === "All" || po.poType === typeFilter;
-      return matchesSearch && matchesType;
-    });
-  }, [poList, searchQuery, typeFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredPOList.length / PAGE_SIZE));
-  const paginatedPOs = useMemo(() => {
-    return filteredPOList.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  }, [filteredPOList, page]);
-
-  // Handle Smart Scan
-  const handleSmartScan = async () => {
-    setSmartScanLoading(true);
-    triggerToast("Initiating Smart Scan... analyzing inventory levels and stocks");
-
-    const startTime = Date.now();
-    try {
-      const resPromise = apiFetch<any>("/purchas-orders/auto-generated", { method: "POST" });
-      const [res] = await Promise.all([
-        resPromise,
-        new Promise((resolve) => setTimeout(resolve, 5000))
-      ]);
-
-      setSmartScanLoading(false);
-      if (res && res.message) {
-        triggerToast(res.message);
-        if (typeof res.message === "string" && res.message.startsWith("Successfully")) {
-          fetchPurchaseOrders();
-        }
-      }
-    } catch (err: any) {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 5000) {
-        await new Promise((resolve) => setTimeout(resolve, 5000 - elapsed));
-      }
-      setSmartScanLoading(false);
-      triggerToast(err.message || "Failed to run Smart Scan.");
-    }
-  };
-
-  // Handle Manual PO - opens supplier picker
-  const handleManualPO = () => {
-    setSupplierSearchQuery("");
-    setSupplierSelectOpen(true);
-  };
-
-  // Select Supplier and Create Draft PO — then immediately open the new/existing draft
-  const selectSupplierForPO = async (supplier: Supplier) => {
-    setSupplierSelectOpen(false);
-    try {
-      const res = await apiFetch<any>("/purchas-orders/manual", {
-        method: "POST",
-        body: JSON.stringify({ supplier_id: supplier.id }),
-      });
-      if (res && res.message) {
-        triggerToast(res.message);
-      }
-
-      // Re-fetch the full list so we have the new PO in state
-      const freshData = await apiFetch<any[]>("/purchas-orders/");
-      const mapped: PurchaseOrder[] = freshData.map((po: any) => ({
-        id: po.po_id,
-        supplierId: po.supplier_id,
-        supplierName: po.supplier_name || "Unknown Supplier",
-        poType: po.po_type,
-        createdBy: po.created_by || "System",
-        createdAt: po.created_at ? new Date(po.created_at).toLocaleString() : "",
-        updatedAt: po.created_at ? new Date(po.created_at).toLocaleString() : "",
-        items: [],
-        netTotal: 0
-      }));
-      setPoList(mapped);
-
-      // Open the created/existing draft right away using the po_id from the response
-      const targetPo = mapped.find(p => p.id === res.po_id);
-      if (targetPo) {
-        handleOpenPO(targetPo);
-      }
-    } catch (err: any) {
-      triggerToast(err.message || "Failed to create manual purchase order.");
-    }
-  };
-
-  // Delete Purchase Order
-  const handleDeletePO = async (poId: string) => {
-    try {
-      const res = await apiFetch<any>(`/purchas-orders/${poId}`, { method: "DELETE" });
-      if (res && res.message) {
-        triggerToast(res.message);
-      }
-      fetchPurchaseOrders();
-    } catch (err: any) {
-      triggerToast(err.message || "Failed to delete purchase order.");
-    }
-  };
-
-  // Open PO View/Edit & Fetch Items from GET /{po_id}/items
-  const handleOpenPO = async (po: PurchaseOrder) => {
-    setSelectedPO(po);
-    setIsEditingPO(po.poType === "Draft");
-    setLoadingPOItems(true);
-
-    try {
-      // 1. Fetch items for this PO
-      const itemsData = await apiFetch<any[]>(`/purchas-orders/${po.id}/items`);
-      const mappedItems: POItem[] = itemsData.map((item: any, idx: number) => ({
-        poiId: item.poi_id,
-        no: idx + 1,
-        itemId: item.item_id,
-        itemName: item.item_name || "Unknown Item",
-        quantity: item.quantity,
-        unitPrice: item.unit_price,
-        total: item.quantity * item.unit_price,
-        isStaleAlert: item.is_stale_alert
-      }));
-
-      const netTotal = mappedItems.reduce((sum, item) => sum + item.total, 0);
-
-      setSelectedPO({
-        ...po,
-        items: mappedItems,
-        netTotal
-      });
-
-      // 2. Fetch all items for this supplier to populate "Add Item from Supplier" dropdown
-      const allItemsData = await apiFetch<any[]>("/items/");
-      const filteredSupplierItems: ItemOption[] = allItemsData
-        .filter((i: any) => i.supplier_id === po.supplierId && i.is_active)
-        .map((i: any) => ({
-          id: i.item_id,
-          name: i.item_name,
-          supplierId: i.supplier_id,
-          defaultPrice: i.cost_price || 0,
-          isActive: i.is_active
-        }));
-      setSupplierItems(filteredSupplierItems);
-
-    } catch (err: any) {
-      triggerToast(err.message || "Failed to load purchase order items.");
-    } finally {
-      setLoadingPOItems(false);
-    }
-  };
-
-  // Exit PO editor/view
-  const handleExitPO = () => {
-    setSelectedPO(null);
-    setIsEditingPO(false);
-  };
-
-  // Update item quantity in Draft PO (local state)
-  const handleUpdateQty = (itemNo: number, val: string) => {
-    if (!selectedPO) return;
-    const qty = Math.max(1, parseInt(val) || 1);
-    const updatedItems = selectedPO.items.map(item => {
-      if (item.no === itemNo) {
-        return {
-          ...item,
-          quantity: qty,
-          total: qty * item.unitPrice
-        };
-      }
-      return item;
-    });
-
-    const net = updatedItems.reduce((acc, curr) => acc + curr.total, 0);
-    setSelectedPO({
-      ...selectedPO,
-      items: updatedItems,
-      netTotal: net
-    });
-  };
-
-  // Update item price in Draft PO (local state)
-  const handleUpdatePrice = (itemNo: number, val: string) => {
-    if (!selectedPO) return;
-    const price = Math.max(0, parseFloat(val) || 0);
-    const updatedItems = selectedPO.items.map(item => {
-      if (item.no === itemNo) {
-        return {
-          ...item,
-          unitPrice: price,
-          total: item.quantity * price
-        };
-      }
-      return item;
-    });
-
-    const net = updatedItems.reduce((acc, curr) => acc + curr.total, 0);
-    setSelectedPO({
-      ...selectedPO,
-      items: updatedItems,
-      netTotal: net
-    });
-  };
-
-  // Add item to Draft PO — LOCAL STATE ONLY. Changes are batched and sent on "Save Draft".
-  const handleAddItemToPO = (itemOption: ItemOption) => {
-    if (!selectedPO) return;
-
-    if (selectedPO.items.find(i => i.itemId === itemOption.id)) {
-      triggerToast("Item already exists in this Purchase Order!");
-      setAddItemDropdownOpen(false);
+  // Load items linked to the selected supplier (with agreed prices)
+  useEffect(() => {
+    if (!selectedSupplierId) {
+      setAvailableItems([]);
+      setOrderItems({});
       return;
     }
-
-    const newItem: POItem = {
-      poiId: `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      no: selectedPO.items.length + 1,
-      itemId: itemOption.id,
-      itemName: itemOption.name,
-      quantity: 1,
-      unitPrice: itemOption.defaultPrice,
-      total: itemOption.defaultPrice
-    };
-
-    const updatedItems = [...selectedPO.items, newItem];
-    const net = updatedItems.reduce((acc, curr) => acc + curr.total, 0);
-    setSelectedPO({ ...selectedPO, items: updatedItems, netTotal: net });
-    setAddItemDropdownOpen(false);
-  };
-
-  // Remove item from Draft PO — LOCAL STATE ONLY. Changes are batched and sent on "Save Draft".
-  const handleRemoveItemFromPO = (itemToRemove: POItem) => {
-    if (!selectedPO) return;
-
-    const filteredItems = selectedPO.items
-      .filter(i => i.poiId !== itemToRemove.poiId)
-      .map((item, idx) => ({ ...item, no: idx + 1 }));
-    const net = filteredItems.reduce((acc, curr) => acc + curr.total, 0);
-    setSelectedPO({ ...selectedPO, items: filteredItems, netTotal: net });
-  };
-
-  // Save Draft PO — syncs all local changes (adds, removes, edits) to backend in one batch
-  const handleSavePO = async () => {
-    if (!selectedPO) return;
-    setSavingPO(true);
-
-    try {
-      // 1. Fetch current backend state to detect which items were removed locally
-      const serverItems = await apiFetch<any[]>(`/purchas-orders/${selectedPO.id}/items`);
-      const localItemIds = new Set(selectedPO.items.map(i => i.itemId));
-
-      // 2. Delete items that were removed in the UI
-      for (const serverItem of serverItems) {
-        if (!localItemIds.has(serverItem.item_id)) {
-          await apiFetch<any>(`/purchas-orders/items/${serverItem.poi_id}`, { method: "DELETE" });
-        }
-      }
-
-      // 3. POST newly added items (temp- prefix = not yet on server)
-      for (const item of selectedPO.items) {
-        if (item.poiId.startsWith("temp-")) {
-          await apiFetch<any>(`/purchas-orders/${selectedPO.id}/items`, {
-            method: "POST",
-            body: JSON.stringify({
-              item_id: item.itemId,
-              quantity: item.quantity,
-              unit_price: item.unitPrice
-            })
-          });
-        }
-      }
-
-      // 4. Bulk-update existing items (qty / unit_price changes)
-      const existingItems = selectedPO.items.filter(i => !i.poiId.startsWith("temp-"));
-      if (existingItems.length > 0) {
-        await apiFetch<any>(`/purchas-orders/${selectedPO.id}/items/bulk-update`, {
-          method: "PATCH",
-          body: JSON.stringify(existingItems.map(i => ({
-            poi_id: i.poiId,
-            quantity: i.quantity,
-            unit_price: i.unitPrice
-          })))
+    setLoadingItems(true);
+    setCreateError("");
+    apiFetch<SupplierItemOption[]>(`/suppliers/${selectedSupplierId}/items`)
+      .then((data) => {
+        setAvailableItems(data || []);
+        const init: { [itemId: string]: { selected: boolean; quantity: number } } = {};
+        (data || []).forEach((item) => {
+          init[item.item_id] = { selected: false, quantity: 10 };
         });
+        setOrderItems(init);
+      })
+      .catch((err) => {
+        setAvailableItems([]);
+        setCreateError(err.message || "Failed to load supplier items.");
+      })
+      .finally(() => {
+        setLoadingItems(false);
+      });
+  }, [selectedSupplierId]);
+
+  // Filtered orders list
+  const filteredOrders = useMemo(() => {
+    return orders.filter((po) => {
+      const q = search.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        po.po_id.toLowerCase().includes(q) ||
+        po.supplier_name.toLowerCase().includes(q);
+      const matchStatus = statusFilter === "ALL" || po.status === statusFilter;
+      const matchSupplier = supplierFilter === "ALL" || po.supplier_id === supplierFilter;
+      return matchSearch && matchStatus && matchSupplier;
+    });
+  }, [orders, search, statusFilter, supplierFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+  const pageOrders = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredOrders.slice(start, start + PAGE_SIZE);
+  }, [filteredOrders, page]);
+
+  // Total amount calculated in create modal
+  const createModalTotal = useMemo(() => {
+    let total = 0;
+    availableItems.forEach((item) => {
+      const entry = orderItems[item.item_id];
+      if (entry?.selected && entry.quantity > 0) {
+        total += item.agreed_price * entry.quantity;
       }
+    });
+    return total;
+  }, [availableItems, orderItems]);
 
-      triggerToast(`Draft purchase order saved successfully.`);
-      fetchPurchaseOrders();
-      setSelectedPO(null);
-      setIsEditingPO(false);
-    } catch (err: any) {
-      triggerToast(err.message || "Failed to save purchase order.");
-    } finally {
-      setSavingPO(false);
-    }
-  };
-
-  // Generate PO (Save bulk-update then call POST /{po_id}/generate and download PDF)
-  const handleGeneratePO = async () => {
-    if (!selectedPO) return;
-    if (selectedPO.items.length === 0) {
-      triggerToast("Cannot generate a purchase order with zero items.");
+  // Create Purchase Order Submit
+  const handleCreatePO = async () => {
+    setCreateError("");
+    if (!selectedSupplierId) {
+      setCreateError("Please select a vendor supplier.");
       return;
     }
-    setGeneratingPO(true);
 
+    const selectedLines = availableItems
+      .filter((item) => orderItems[item.item_id]?.selected && orderItems[item.item_id].quantity > 0)
+      .map((item) => ({
+        item_id: item.item_id,
+        quantity: orderItems[item.item_id].quantity,
+      }));
+
+    if (selectedLines.length === 0) {
+      setCreateError("Please select at least one item to include in this purchase order.");
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      // 1. Sync all local draft changes first (same logic as Save Draft)
-      if (isEditingPO) {
-        const serverItems = await apiFetch<any[]>(`/purchas-orders/${selectedPO.id}/items`);
-        const localItemIds = new Set(selectedPO.items.map(i => i.itemId));
-
-        for (const serverItem of serverItems) {
-          if (!localItemIds.has(serverItem.item_id)) {
-            await apiFetch<any>(`/purchas-orders/items/${serverItem.poi_id}`, { method: "DELETE" });
-          }
-        }
-
-        for (const item of selectedPO.items) {
-          if (item.poiId.startsWith("temp-")) {
-            await apiFetch<any>(`/purchas-orders/${selectedPO.id}/items`, {
-              method: "POST",
-              body: JSON.stringify({
-                item_id: item.itemId,
-                quantity: item.quantity,
-                unit_price: item.unitPrice
-              })
-            });
-          }
-        }
-
-        const existingItems = selectedPO.items.filter(i => !i.poiId.startsWith("temp-"));
-        if (existingItems.length > 0) {
-          await apiFetch<any>(`/purchas-orders/${selectedPO.id}/items/bulk-update`, {
-            method: "PATCH",
-            body: JSON.stringify(existingItems.map(i => ({
-              poi_id: i.poiId,
-              quantity: i.quantity,
-              unit_price: i.unitPrice
-            })))
-          });
-        }
-      }
-
-      // 2. Call POST /{po_id}/generate for PDF streaming
-      const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-      const pdfResponse = await fetch(`${baseUrl}/purchas-orders/${selectedPO.id}/generate`, {
+      await apiFetch("/purchas-orders/", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        body: JSON.stringify({
+          supplier_id: selectedSupplierId,
+          notes: poNotes.trim() || null,
+          items: selectedLines,
+        }),
       });
 
-      if (!pdfResponse.ok) {
-        const errJson = await pdfResponse.json().catch(() => null);
-        throw new Error(errJson?.detail || "Failed to generate Purchase Order PDF.");
-      }
-
-      // 3. Convert response to Blob and trigger browser download
-      const blob = await pdfResponse.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Purchase_Order_${selectedPO.id}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      triggerToast(`PO Generated & downloaded successfully!`);
-      fetchPurchaseOrders();
-      setSelectedPO(null);
-      setIsEditingPO(false);
+      await loadPurchaseOrders();
+      setCreateModalOpen(false);
+      setSelectedSupplierId("");
+      setPoNotes("");
+      setOrderItems({});
     } catch (err: any) {
-      triggerToast(err.message || "Failed to generate purchase order.");
+      setCreateError(err.message || "Failed to create purchase order.");
     } finally {
-      setGeneratingPO(false);
+      setSubmitting(false);
     }
   };
 
-  return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div style={{
-          position: "fixed",
-          bottom: 24,
-          right: 24,
-          padding: "12px 20px",
-          background: c.accent,
-          color: "#fff",
-          borderRadius: 10,
-          boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          zIndex: 1000,
-          animation: "slideIn 0.3s ease-out",
-          fontSize: 13.5,
-          fontWeight: 500
-        }}>
-          <Check size={16} strokeWidth={2.5} />
-          {toastMessage}
-        </div>
-      )}
+  // State machine transition actions
+  const handleUpdateStatus = async (poId: string, newStatus: POStatus) => {
+    try {
+      const updated = await apiFetch<PurchaseOrder>(`/purchas-orders/${poId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: newStatus }),
+      });
+      await loadPurchaseOrders();
+      if (selectedPO && selectedPO.po_id === poId) {
+        setSelectedPO(updated);
+      }
+    } catch (err: any) {
+      alert(err.message || `Failed to update status to ${newStatus}.`);
+    }
+  };
 
-      {selectedPO ? (
-        /* ── VIEW / EDIT DRAFT PO SPREADSHEET VIEW ── */
-        <div style={{
-          background: c.surface,
-          border: `1px solid ${c.border}`,
-          borderRadius: 14,
-          padding: 24,
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: 20,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.02)"
-        }}>
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${c.border}`, paddingBottom: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <button
-                onClick={handleExitPO}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  border: `1px solid ${c.border}`,
-                  background: c.bg,
-                  color: c.textMuted,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  transition: "all 0.15s"
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = c.surfaceMuted}
-                onMouseLeave={e => e.currentTarget.style.background = c.bg}
-              >
-                <ArrowLeft size={16} />
-              </button>
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 16, fontWeight: 700 }}>{selectedPO.id}</span>
-                  <span style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    padding: "3px 8px",
-                    borderRadius: 999,
-                    background: selectedPO.poType === "Draft" ? c.warnSoft : c.accentSoft,
-                    color: selectedPO.poType === "Draft" ? c.warn : c.accent
-                  }}>
-                    {selectedPO.poType}
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, color: c.textMuted, marginTop: 2 }}>
-                  Supplier: <strong style={{ color: c.text }}>{selectedPO.supplierName}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
+  // Download PDF
+  const handleDownloadPDF = async (poId: string) => {
+    try {
+      const res = await fetch(`/api/v1/purchas-orders/${poId}/pdf`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
+        },
+      });
+      if (!res.ok) throw new Error("Failed to download PDF");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `PurchaseOrder-${poId.slice(0, 8).toUpperCase()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || "Failed to download PO PDF.");
+    }
+  };
 
-          {/* Excel spreadsheet container */}
-          <div style={{ flex: 1, overflowY: "auto", minHeight: 200, border: `1px solid ${c.border}`, borderRadius: 10, overflowX: "auto" }}>
-            {loadingPOItems ? (
-              <div style={{ padding: 40, textAlign: "center", color: c.textMuted, fontSize: 14 }}>
-                Loading order line items...
-              </div>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-                <thead>
-                  <tr style={{ background: c.surfaceMuted, borderBottom: `2px solid ${c.border}` }}>
-                    <th style={{ padding: "10px 14px", width: 60, fontSize: 12, fontWeight: 600, color: c.textMuted, textAlign: "left" }}>No.</th>
-                    <th style={{ padding: "10px 14px", fontSize: 12, fontWeight: 600, color: c.textMuted, textAlign: "left" }}>Item Name</th>
-                    <th style={{ padding: "10px 14px", width: 140, fontSize: 12, fontWeight: 600, color: c.textMuted, textAlign: "right" }}>Quantity</th>
-                    <th style={{ padding: "10px 14px", width: 160, fontSize: 12, fontWeight: 600, color: c.textMuted, textAlign: "right" }}>Unit Price (Rs)</th>
-                    <th style={{ padding: "10px 14px", width: 180, fontSize: 12, fontWeight: 600, color: c.textMuted, textAlign: "right" }}>Total (Rs)</th>
-                    {isEditingPO && <th style={{ padding: "10px 14px", width: 50 }} />}
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedPO.items.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: "30px 14px", textAlign: "center", color: c.textFaint }}>
-                        No items in this purchase order yet. Click below to add an active supplier item.
-                      </td>
-                    </tr>
-                  ) : selectedPO.items.map((item) => (
-                    <tr key={item.poiId} style={{ borderBottom: `1px solid ${c.border}`, transition: "background 0.1s" }}>
-                      {/* No. (Read-only) */}
-                      <td style={{ padding: "10px 14px", fontSize: 13.5, color: c.textFaint, fontWeight: 500 }}>
-                        {item.no}
-                      </td>
+  // ════════════════════════════════════════════════════════════════════════════
+  // DEDICATED FULL-PAGE PURCHASE ORDER DETAILS VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  if (selectedPO) {
+    const activeSupplier = supplierList.find((s) => s.id === selectedPO.supplier_id);
+    const isCompleted = selectedPO.status === "Completed";
+    const isCancelled = selectedPO.status === "Cancelled";
 
-                      {/* Item Name */}
-                      <td style={{ padding: "10px 14px", fontSize: 13.5, fontWeight: 500, color: c.text }}>
-                        {item.itemName}
-                        {item.isStaleAlert && (
-                          <span style={{ marginLeft: 8, fontSize: 10, color: c.textMuted, background: c.surfaceMuted, padding: "2px 6px", borderRadius: 4 }}>
-                            Restocked
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Quantity (Editable if draft) */}
-                      <td style={{ padding: "6px 14px", textAlign: "right" }}>
-                        {isEditingPO ? (
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) => handleUpdateQty(item.no, e.target.value)}
-                            style={{
-                              width: "100%",
-                              padding: "6px 10px",
-                              fontSize: 13.5,
-                              border: `1px solid ${c.border}`,
-                              background: c.bg,
-                              color: c.text,
-                              borderRadius: 6,
-                              textAlign: "right",
-                              outline: "none",
-                              fontWeight: 600
-                            }}
-                          />
-                        ) : (
-                          <span style={{ fontSize: 13.5, fontWeight: 600, color: c.text }}>{item.quantity}</span>
-                        )}
-                      </td>
-
-                      {/* Unit Price (Editable if draft) */}
-                      <td style={{ padding: "6px 14px", textAlign: "right" }}>
-                        {isEditingPO ? (
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={item.unitPrice}
-                            onChange={(e) => handleUpdatePrice(item.no, e.target.value)}
-                            style={{
-                              width: "100%",
-                              padding: "6px 10px",
-                              fontSize: 13.5,
-                              border: `1px solid ${c.border}`,
-                              background: c.bg,
-                              color: c.text,
-                              borderRadius: 6,
-                              textAlign: "right",
-                              outline: "none",
-                              fontWeight: 600
-                            }}
-                          />
-                        ) : (
-                          <span style={{ fontSize: 13.5, color: c.textMuted }}>Rs {item.unitPrice.toLocaleString()}</span>
-                        )}
-                      </td>
-
-                      {/* Total (Read-only calculated) */}
-                      <td style={{ padding: "10px 14px", fontSize: 13.5, fontWeight: 600, color: c.text, textAlign: "right" }}>
-                        Rs {item.total.toLocaleString()}
-                      </td>
-
-                      {/* Delete Item (Visible in edit draft mode) */}
-                      {isEditingPO && (
-                        <td style={{ padding: "6px 10px", textAlign: "center" }}>
-                          <button
-                            onClick={() => handleRemoveItemFromPO(item)}
-                            style={{
-                              border: "none",
-                              background: "transparent",
-                              color: c.danger || "#B3473C",
-                              cursor: "pointer",
-                              fontSize: 12,
-                              padding: 4,
-                              opacity: 0.75
-                            }}
-                            title="Remove item"
-                          >
-                            <X size={15} />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-
-                  {/* Plus button at the bottom of last item */}
-                  {isEditingPO && (
-                    <tr>
-                      <td colSpan={6} style={{ padding: "10px 14px", borderBottom: `1px solid ${c.border}` }}>
-                        <div style={{ position: "relative" }}>
-                          <button
-                            onClick={() => {
-                              setItemSearchQuery("");
-                              setAddItemDropdownOpen(!addItemDropdownOpen);
-                            }}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "6px 12px",
-                              borderRadius: 6,
-                              border: `1.5px dashed ${c.border}`,
-                              background: "transparent",
-                              color: c.accent,
-                              fontSize: 12.5,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              transition: "all 0.15s"
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = c.surfaceMuted}
-                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                          >
-                            <Plus size={14} /> Add Item from Supplier
-                          </button>
-
-                          {/* Add Item Dropdown Panel */}
-                          {addItemDropdownOpen && (
-                            <div style={{
-                              position: "absolute",
-                              top: 36,
-                              left: 0,
-                              width: 320,
-                              background: c.surface,
-                              border: `1px solid ${c.border}`,
-                              borderRadius: 8,
-                              boxShadow: "0 6px 20px rgba(0,0,0,0.15)",
-                              zIndex: 100,
-                              padding: 6
-                            }}>
-                              <div style={{ fontSize: 11, fontWeight: 600, color: c.textFaint, padding: "6px 10px", borderBottom: `1px solid ${c.border}`, marginBottom: 4 }}>
-                                Active Supplier Products ({supplierItems.length})
-                              </div>
-                              <div style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 6,
-                                padding: "6px 10px",
-                                borderRadius: 6,
-                                border: `1px solid ${c.border}`,
-                                background: c.bg,
-                                margin: "4px 6px 8px 6px"
-                              }}>
-                                <Search size={12} color={c.textFaint} />
-                                <input
-                                  value={itemSearchQuery}
-                                  onChange={e => setItemSearchQuery(e.target.value)}
-                                  placeholder="Search supplier items..."
-                                  style={{
-                                    border: "none",
-                                    outline: "none",
-                                    background: "transparent",
-                                    color: c.text,
-                                    fontSize: 12,
-                                    width: "100%",
-                                    fontFamily: "inherit"
-                                  }}
-                                />
-                              </div>
-                              <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                                {supplierItems.filter(itm => itm.name.toLowerCase().includes(itemSearchQuery.toLowerCase())).length === 0 ? (
-                                  <div style={{ fontSize: 12, color: c.textFaint, padding: "10px 10px" }}>
-                                    No active items found for this supplier.
-                                  </div>
-                                ) : supplierItems.filter(itm => itm.name.toLowerCase().includes(itemSearchQuery.toLowerCase())).map(itm => (
-                                  <button
-                                    key={itm.id}
-                                    onClick={() => handleAddItemToPO(itm)}
-                                    style={{
-                                      width: "100%",
-                                      padding: "8px 10px",
-                                      textAlign: "left",
-                                      fontSize: 12.5,
-                                      border: "none",
-                                      background: "transparent",
-                                      color: c.text,
-                                      cursor: "pointer",
-                                      borderRadius: 4,
-                                      display: "flex",
-                                      justifyContent: "space-between"
-                                    }}
-                                    onMouseEnter={e => e.currentTarget.style.background = c.bg}
-                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                  >
-                                    <span>{itm.name}</span>
-                                    <span style={{ color: c.textMuted, fontWeight: 500 }}>Rs {itm.defaultPrice}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-
-                  {/* Net Total Row */}
-                  <tr style={{ background: c.surfaceMuted }}>
-                    <td colSpan={3} style={{ padding: "14px 14px", fontSize: 13, fontWeight: 600, color: c.textMuted }}>
-                      Net Total Order Value
-                    </td>
-                    <td colSpan={3} style={{ padding: "14px 14px", fontSize: 16, fontWeight: 700, color: c.accent, textAlign: "right" }}>
-                      Rs {selectedPO.netTotal.toLocaleString()}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {/* Action buttons at bottom */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, borderTop: `1px solid ${c.border}`, paddingTop: 16 }}>
-            <button
-              onClick={handleExitPO}
-              style={{
-                padding: "10px 18px",
-                borderRadius: 8,
-                border: `1px solid ${c.border}`,
-                background: "transparent",
-                color: c.text,
-                fontSize: 13.5,
-                fontWeight: 600,
-                cursor: "pointer"
-              }}
-            >
-              Cancel
-            </button>
-            {isEditingPO && (
-              <button
-                onClick={handleSavePO}
-                disabled={savingPO || loadingPOItems}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "10px 20px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: c.accentSoft,
-                  color: c.accent,
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  cursor: savingPO ? "default" : "pointer",
-                  opacity: savingPO ? 0.7 : 1
-                }}
-              >
-                <Save size={15} /> {savingPO ? "Saving..." : "Save Draft"}
-              </button>
-            )}
-            <button
-              onClick={handleGeneratePO}
-              disabled={generatingPO || loadingPOItems}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 22px",
-                borderRadius: 8,
-                border: "none",
-                background: c.accent,
-                color: "#fff",
-                fontSize: 13.5,
-                fontWeight: 600,
-                cursor: generatingPO ? "default" : "pointer",
-                opacity: generatingPO ? 0.7 : 1
-              }}
-            >
-              <FileText size={15} /> {generatingPO ? "Generating PDF..." : "Generate PO"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* ── MAIN WORKSPACE VIEW (POs LIST) ── */
-        <div style={{ display: "flex", flexDirection: "column", gap: 20, height: "100%" }}>
-          {/* Action Buttons & Quick Summary */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 16,
-            background: c.surface,
-            border: `1px solid ${c.border}`,
-            borderRadius: 14,
-            padding: 18
-          }}>
-            {/* Manual PO Button */}
-            <button
-              onClick={handleManualPO}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 8,
-                padding: 18,
-                borderRadius: 10,
-                border: `1.5px dashed ${c.accent}`,
-                background: c.accentSoft,
-                cursor: "pointer",
-                textAlign: "left",
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow = "0 6px 15px rgba(59, 110, 94, 0.1)";
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.transform = "none";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            >
-              <div style={{
-                width: 36,
-                height: 36,
-                borderRadius: 8,
-                background: c.accent,
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}>
-                <Plus size={18} strokeWidth={2.5} />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: c.accent }}>Manual PO</div>
-                <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Select a supplier and write details manually</div>
-              </div>
-            </button>
-
-            {/* Smart Scan Button */}
-            <button
-              onClick={handleSmartScan}
-              disabled={smartScanLoading}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 8,
-                padding: 18,
-                borderRadius: 10,
-                border: `1px solid ${c.border}`,
-                background: c.bg,
-                cursor: smartScanLoading ? "default" : "pointer",
-                textAlign: "left",
-                transition: "all 0.2s"
-              }}
-              onMouseEnter={e => {
-                if (!smartScanLoading) {
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                  e.currentTarget.style.background = c.surfaceMuted;
-                }
-              }}
-              onMouseLeave={e => {
-                if (!smartScanLoading) {
-                  e.currentTarget.style.transform = "none";
-                  e.currentTarget.style.background = c.bg;
-                }
-              }}
-            >
-              <div style={{
-                width: 36,
-                height: 36,
-                borderRadius: 8,
-                background: c.warn,
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}>
-                <Sparkles size={18} />
-              </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: c.text }}>Smart Scan</div>
-                <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                  {smartScanLoading ? "Analyzing..." : "Auto-scan low inventory & generate orders"}
-                </div>
-              </div>
-            </button>
-          </div>
-
-          <DataTable
-            c={c}
-            minWidth={500}
-            columns={[
-              {
-                key: "id",
-                header: "PO ID",
-                render: (po) => (
-                  <span style={{ fontWeight: 600, color: c.text }}>
-                    {po.id.length > 8 ? `${po.id.slice(0, 8)}...` : po.id}
-                  </span>
-                ),
-              },
-              {
-                key: "supplierName",
-                header: "Supplier Name",
-                render: (po) => <span style={{ fontWeight: 500 }}>{po.supplierName}</span>,
-              },
-              {
-                key: "poType",
-                header: "PO Type",
-                render: (po) => (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: "3px 8px",
-                      borderRadius: 999,
-                      background: po.poType === "Draft" ? c.warnSoft : c.accentSoft,
-                      color: po.poType === "Draft" ? c.warn : c.accent,
-                    }}
-                  >
-                    {po.poType}
-                  </span>
-                ),
-              },
-              {
-                key: "createdBy",
-                header: "Created By",
-                render: (po) => <span style={{ color: c.textMuted }}>{po.createdBy || "System"}</span>,
-              },
-              {
-                key: "createdAt",
-                header: "Created At",
-                render: (po) => <span style={{ color: c.textMuted }}>{po.createdAt}</span>,
-              },
-              {
-                key: "actions",
-                header: "",
-                width: 60,
-                align: "right",
-                render: (po) => (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPoToDelete(po);
-                    }}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      color: c.error || c.danger || "#B3473C",
-                      cursor: "pointer",
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "all 0.15s",
-                    }}
-                    onMouseEnter={(elm) => (elm.currentTarget.style.background = c.warnSoft || "#FCECEB")}
-                    onMouseLeave={(elm) => (elm.currentTarget.style.background = "transparent")}
-                    title="Delete Purchase Order"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                ),
-              },
-            ]}
-            data={paginatedPOs}
-            keyExtractor={(po) => po.id}
-            onRowClick={(po) => handleOpenPO(po)}
-            emptyMessage="No Purchase Orders found."
-            filterSlot={
-              <div style={{ display: "flex", gap: 6 }}>
-                {(["All", "Draft", "Generated"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => {
-                      setTypeFilter(t);
-                      setPage(1);
-                    }}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 7,
-                      border: `1px solid ${typeFilter === t ? c.accent : c.border}`,
-                      background: typeFilter === t ? c.accentSoft : "transparent",
-                      color: typeFilter === t ? c.accent : c.textMuted,
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "all 0.15s",
-                    }}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            }
-            search={{
-              value: searchQuery,
-              onChange: (val) => {
-                setSearchQuery(val);
-                setPage(1);
-              },
-              placeholder: "Search POs...",
-              maxWidth: 220,
-            }}
-            pagination={{
-              page,
-              totalPages,
-              totalCount: filteredPOList.length,
-              pageSize: PAGE_SIZE,
-              itemLabel: "orders",
-              onPageChange: setPage,
-            }}
-          />
-        </div>
-      )}
-
-      {/* Supplier Select Modal (for Manual PO selection) */}
-      {supplierSelectOpen && (
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Top Header & Actions Bar */}
         <div
-          onClick={() => setSupplierSelectOpen(false)}
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(10,10,8,0.5)",
-            zIndex: 999,
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            padding: 20
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
+            borderBottom: `1px solid ${c.border}`,
+            paddingBottom: 14,
           }}
         >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              width: 440,
-              maxWidth: "100%",
-              background: c.surface,
-              border: `1px solid ${c.border}`,
-              borderRadius: 14,
-              padding: 22,
-              boxShadow: "0 10px 30px rgba(0,0,0,0.15)",
-              maxHeight: "90vh",
-              display: "flex",
-              flexDirection: "column"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-              <span style={{ fontSize: 15, fontWeight: 600 }}>Select Supplier</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button
+              onClick={() => setSelectedPO(null)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <ArrowLeft size={14} /> Back to Orders
+            </button>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h1 style={{ fontSize: 18, fontWeight: 700, color: c.text, margin: 0 }}>
+                  PO-{selectedPO.po_id.slice(0, 8).toUpperCase()}
+                </h1>
+                <POStatusIndicator status={selectedPO.status} />
+              </div>
+              <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 4 }}>
+                Created on {new Date(selectedPO.created_at).toLocaleString()}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {selectedPO.status === "Draft" && (
               <button
-                onClick={() => setSupplierSelectOpen(false)}
+                onClick={() => handleUpdateStatus(selectedPO.po_id, "Pending Approval")}
                 style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 7,
-                  border: "none",
-                  background: c.surfaceMuted,
-                  color: c.textMuted,
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer"
+                  gap: 6,
+                  padding: "7px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: c.accent,
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
                 }}
               >
-                <X size={15} />
+                Submit for Approval
               </button>
-            </div>
+            )}
 
-            {/* Search Input */}
-            <div style={{
+            {selectedPO.status === "Pending Approval" && (
+              <button
+                onClick={() => handleUpdateStatus(selectedPO.po_id, "Approved")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#2E7D32",
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <CheckCircle size={14} /> Approve Order
+              </button>
+            )}
+
+            {!isCompleted && !isCancelled && (
+              <button
+                onClick={() => handleUpdateStatus(selectedPO.po_id, "Cancelled")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 14px",
+                  borderRadius: 8,
+                  border: `1px solid #F8D7DA`,
+                  background: "#FDF2F2",
+                  color: "#DC2626",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                <XCircle size={14} /> Cancel Order
+              </button>
+            )}
+
+            <button
+              onClick={() => handleDownloadPDF(selectedPO.po_id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 14px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              <Download size={14} /> Download PDF
+            </button>
+          </div>
+        </div>
+
+        {/* Summary Overview Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+          {/* Supplier Info Card */}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Vendor Supplier</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              {selectedPO.supplier_name}
+            </div>
+            {activeSupplier && (
+              <div style={{ marginTop: 8, fontSize: 12.5, color: c.textMuted, display: "flex", flexDirection: "column", gap: 3 }}>
+                <div>Contact: <strong style={{ color: c.text }}>{activeSupplier.contactPerson}</strong></div>
+                <div>Phone: {activeSupplier.phone} · {activeSupplier.email}</div>
+                <div>Address: {activeSupplier.address}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Financial Summary Card */}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Order Value</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#2E7D32", marginTop: 4 }}>
+              ${Number(selectedPO.total_amount).toFixed(2)}
+            </div>
+            <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 6 }}>
+              {selectedPO.items?.length || 0} line items ordered
+            </div>
+          </div>
+        </div>
+
+        {selectedPO.notes && (
+          <div
+            style={{
+              background: c.surfaceMuted,
+              border: `1px solid ${c.border}`,
+              borderRadius: 10,
+              padding: "12px 16px",
+              fontSize: 13,
+              color: c.textMuted,
+            }}
+          >
+            <strong style={{ color: c.text }}>Order Notes: </strong>
+            {selectedPO.notes}
+          </div>
+        )}
+
+        {/* Line Items Table with Receiving Progress */}
+        <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "18px 20px" }}>
+          <div style={{ marginBottom: 14 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: c.text, margin: 0 }}>
+              Order Line Items & Delivery Status
+            </h2>
+            <p style={{ fontSize: 12, color: c.textMuted, margin: "3px 0 0 0" }}>
+              Fixed agreed pricing locked from supplier sourcing agreement.
+            </p>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ color: c.textFaint, textAlign: "left", borderBottom: `1px solid ${c.border}` }}>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>Item & SKU</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>Agreed Unit Price</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>Ordered</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>Received</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500 }}>Delivery Progress</th>
+                  <th style={{ padding: "8px 12px", fontWeight: 500, textAlign: "right" }}>Total Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedPO.items?.map((item) => {
+                  const progressPct = item.quantity > 0 ? Math.min(100, Math.round((item.quantity_received / item.quantity) * 100)) : 0;
+                  return (
+                    <tr key={item.poi_id} style={{ borderBottom: `1px solid ${c.border}` }}>
+                      <td style={{ padding: "12px 12px" }}>
+                        <div style={{ fontWeight: 600, color: c.text }}>{item.item_name}</div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted, fontFamily: "monospace" }}>
+                          {item.sku}
+                        </div>
+                      </td>
+                      <td style={{ padding: "12px 12px", color: c.text }}>
+                        ${Number(item.unit_price).toFixed(2)}
+                      </td>
+                      <td style={{ padding: "12px 12px", fontWeight: 600, color: c.text }}>
+                        {item.quantity} <span style={{ fontSize: 11.5, color: c.textMuted }}>{item.unit}</span>
+                      </td>
+                      <td style={{ padding: "12px 12px", fontWeight: 600, color: item.quantity_received >= item.quantity ? "#2E7D32" : "#D97706" }}>
+                        {item.quantity_received} <span style={{ fontSize: 11.5, color: c.textMuted }}>{item.unit}</span>
+                      </td>
+                      <td style={{ padding: "12px 12px", width: 180 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ flex: 1, height: 6, background: c.surfaceMuted, borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{ width: `${progressPct}%`, height: "100%", background: progressPct >= 100 ? "#2E7D32" : c.accent }} />
+                          </div>
+                          <span style={{ fontSize: 11.5, color: c.textMuted, width: 34 }}>{progressPct}%</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: "12px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>
+                        ${Number(item.total_price).toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MAIN PURCHASE ORDERS TABLE VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Toolbar Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 240, maxWidth: 400 }}>
+          <div
+            style={{
               display: "flex",
               alignItems: "center",
               gap: 8,
-              padding: "8px 12px",
-              borderRadius: 8,
+              background: c.surface,
               border: `1px solid ${c.border}`,
-              background: c.bg,
-              marginBottom: 14
-            }}>
-              <Search size={14} color={c.textFaint} />
-              <input
-                value={supplierSearchQuery}
-                onChange={e => setSupplierSearchQuery(e.target.value)}
-                placeholder="Search suppliers..."
+              borderRadius: 8,
+              padding: "7px 12px",
+              width: "100%",
+            }}
+          >
+            <Search size={14} color={c.textMuted} />
+            <input
+              style={{
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                fontSize: 13,
+                color: c.text,
+                width: "100%",
+                fontFamily: "inherit",
+              }}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search PO ID, Supplier..."
+            />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Status Filter */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setStatusMenuOpen(!statusMenuOpen);
+                setSupplierMenuOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${statusFilter !== "ALL" ? c.accent : c.border}`,
+                background: statusFilter !== "ALL" ? c.accentSoft : c.surface,
+                color: statusFilter !== "ALL" ? c.accent : c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <Filter size={13} />
+              {statusFilter === "ALL" ? "All Statuses" : statusFilter}
+            </button>
+
+            {statusMenuOpen && (
+              <div
                 style={{
-                  border: "none",
-                  outline: "none",
-                  background: "transparent",
-                  color: c.text,
-                  fontSize: 13.5,
-                  width: "100%",
-                  fontFamily: "inherit"
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 4,
+                  width: 180,
+                  background: c.surface,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                  zIndex: 20,
+                  padding: 4,
                 }}
-              />
+              >
+                {["ALL", "Draft", "Pending Approval", "Approved", "Partially Received", "Completed", "Cancelled"].map((st) => (
+                  <div
+                    key={st}
+                    onClick={() => {
+                      setStatusFilter(st);
+                      setStatusMenuOpen(false);
+                      setPage(1);
+                    }}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      background: statusFilter === st ? c.surfaceMuted : "transparent",
+                      color: statusFilter === st ? c.accent : c.text,
+                    }}
+                  >
+                    {st === "ALL" ? "All Statuses" : st}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Supplier Filter */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setSupplierMenuOpen(!supplierMenuOpen);
+                setStatusMenuOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${supplierFilter !== "ALL" ? c.accent : c.border}`,
+                background: supplierFilter !== "ALL" ? c.accentSoft : c.surface,
+                color: supplierFilter !== "ALL" ? c.accent : c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <Building2 size={13} />
+              {supplierFilter === "ALL" ? "All Suppliers" : supplierList.find((s) => s.id === supplierFilter)?.supplierName || "Supplier"}
+            </button>
+
+            {supplierMenuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 4,
+                  width: 220,
+                  background: c.surface,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                  zIndex: 20,
+                  padding: 4,
+                }}
+              >
+                <div
+                  onClick={() => {
+                    setSupplierFilter("ALL");
+                    setSupplierMenuOpen(false);
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: "7px 10px",
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    cursor: "pointer",
+                    background: supplierFilter === "ALL" ? c.surfaceMuted : "transparent",
+                    color: supplierFilter === "ALL" ? c.accent : c.text,
+                  }}
+                >
+                  All Suppliers
+                </div>
+                {supplierList.map((sup) => (
+                  <div
+                    key={sup.id}
+                    onClick={() => {
+                      setSupplierFilter(sup.id);
+                      setSupplierMenuOpen(false);
+                      setPage(1);
+                    }}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      background: supplierFilter === sup.id ? c.surfaceMuted : "transparent",
+                      color: supplierFilter === sup.id ? c.accent : c.text,
+                    }}
+                  >
+                    {sup.supplierName}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => setCreateModalOpen(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: c.accent,
+              color: "#fff",
+              border: "none",
+              padding: "8px 14px",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            <Plus size={15} /> Create PO
+          </button>
+        </div>
+      </div>
+
+      {/* Orders Table */}
+      <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ color: c.textFaint, textAlign: "left", background: c.surfaceMuted }}>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>PO Number</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Supplier</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Items</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Total Value</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Status</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Date Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: "center", color: c.textMuted }}>
+                    Loading purchase orders...
+                  </td>
+                </tr>
+              ) : pageOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: "center", color: c.textFaint }}>
+                    No purchase orders found.
+                  </td>
+                </tr>
+              ) : (
+                pageOrders.map((po) => (
+                  <tr
+                    key={po.po_id}
+                    onClick={() => setSelectedPO(po)}
+                    style={{
+                      borderTop: `1px solid ${c.border}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <td style={{ padding: "12px 14px", fontWeight: 600, color: c.text, fontFamily: "monospace" }}>
+                      PO-{po.po_id.slice(0, 8).toUpperCase()}
+                    </td>
+                    <td style={{ padding: "12px 14px", fontWeight: 500, color: c.text }}>
+                      {po.supplier_name}
+                    </td>
+                    <td style={{ padding: "12px 14px", color: c.textMuted }}>
+                      {po.items?.length || po.total_items || 0} items
+                    </td>
+                    <td style={{ padding: "12px 14px", fontWeight: 600, color: c.text }}>
+                      ${Number(po.total_amount).toFixed(2)}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <POStatusIndicator status={po.status} />
+                    </td>
+                    <td style={{ padding: "12px 14px", color: c.textFaint }}>
+                      {new Date(po.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {filteredOrders.length > PAGE_SIZE && (
+          <div style={{ borderTop: `1px solid ${c.border}` }}>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={filteredOrders.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+              c={c}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Create Purchase Order Modal */}
+      {createModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            zIndex: 100,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: c.surface,
+              borderRadius: 14,
+              border: `1px solid ${c.border}`,
+              width: "100%",
+              maxWidth: 620,
+              maxHeight: "90vh",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "16px 20px",
+                borderBottom: `1px solid ${c.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: c.text, margin: 0 }}>
+                Create Purchase Order
+              </h2>
+              <button
+                onClick={() => setCreateModalOpen(false)}
+                style={{ background: "none", border: "none", color: c.textMuted, cursor: "pointer" }}
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-              {supplierList
-                .filter(s => (
-                  (s.supplierName && s.supplierName.toLowerCase().includes(supplierSearchQuery.toLowerCase())) ||
-                  (s.contactPerson && s.contactPerson.toLowerCase().includes(supplierSearchQuery.toLowerCase()))
-                ))
-                .map(s => {
-                  const hasDraft = poList.some(po => po.supplierId === s.id && po.poType === "Draft");
-                  const isInactive = !s.active;
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => selectSupplierForPO(s)}
-                      style={{
-                        width: "100%",
-                        padding: "12px 14px",
-                        textAlign: "left",
-                        borderRadius: 8,
-                        border: `1px solid ${isInactive ? (c.error || "#B3473C") + "33" : hasDraft ? c.warn + "33" : c.border}`,
-                        background: isInactive ? (c.errorSoft || "#FCECEB") : hasDraft ? c.warnSoft : c.bg,
-                        color: c.text,
-                        cursor: "pointer",
-                        transition: "all 0.15s",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4
-                      }}
-                      onMouseEnter={e => {
-                        if (!hasDraft && !isInactive) {
-                          e.currentTarget.style.borderColor = c.accent;
-                          e.currentTarget.style.background = c.surfaceMuted;
-                        }
-                      }}
-                      onMouseLeave={e => {
-                        if (!hasDraft && !isInactive) {
-                          e.currentTarget.style.borderColor = c.border;
-                          e.currentTarget.style.background = c.bg;
-                        }
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{s.supplierName}</span>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          {isInactive && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: c.error || "#B3473C", background: c.errorSoft || "#FCECEB", padding: "2px 6px", borderRadius: 4, border: `1px solid ${(c.error || "#B3473C")}33` }}>
-                              Inactive
-                            </span>
-                          )}
-                          {hasDraft && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: c.warn, background: c.warnSoft, padding: "2px 6px", borderRadius: 4, border: `1px solid ${c.warn}33` }}>
-                              Draft Exists
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span style={{ fontSize: 11.5, color: c.textMuted }}>Contact: {s.contactPerson}</span>
-                    </button>
-                  );
-                })}
-              {supplierList.filter(s => (
-                (s.supplierName && s.supplierName.toLowerCase().includes(supplierSearchQuery.toLowerCase())) ||
-                (s.contactPerson && s.contactPerson.toLowerCase().includes(supplierSearchQuery.toLowerCase()))
-              )).length === 0 && (
-                  <div style={{ textAlign: "center", color: c.textFaint, padding: "20px 0" }}>No suppliers found.</div>
-                )}
+            <div style={{ padding: "18px 20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+              {createError && (
+                <div style={{ padding: "9px 12px", background: c.dangerSoft, color: c.danger, borderRadius: 8, fontSize: 12.5 }}>
+                  {createError}
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                  Select Vendor Supplier *
+                </label>
+                <select
+                  value={selectedSupplierId}
+                  onChange={(e) => setSelectedSupplierId(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 11px",
+                    borderRadius: 8,
+                    border: `1px solid ${c.border}`,
+                    background: c.inputBg,
+                    color: c.text,
+                    fontSize: 13.5,
+                    outline: "none",
+                  }}
+                >
+                  <option value="">-- Choose Supplier --</option>
+                  {supplierList.filter((s) => s.active).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.supplierName}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 11.5, color: c.textFaint, marginTop: 4 }}>
+                  Rule: Only 1 active purchase order is permitted per vendor.
+                </div>
+              </div>
+
+              {selectedSupplierId && (
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 8 }}>
+                    Select Items to Order (Agreed Prices Locked)
+                  </label>
+
+                  {loadingItems ? (
+                    <div style={{ padding: "16px 0", textAlign: "center", color: c.textMuted, fontSize: 13 }}>
+                      Loading supplier catalog...
+                    </div>
+                  ) : availableItems.length === 0 ? (
+                    <div style={{ padding: "16px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
+                      No items linked to this supplier. Link items from the Items page first.
+                    </div>
+                  ) : (
+                    <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                        <thead>
+                          <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                            <th style={{ padding: "7px 10px", width: 30 }}></th>
+                            <th style={{ padding: "7px 10px" }}>Item & SKU</th>
+                            <th style={{ padding: "7px 10px" }}>Agreed Unit Price</th>
+                            <th style={{ padding: "7px 10px", width: 110 }}>Quantity</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {availableItems.map((item) => {
+                            const isSelected = orderItems[item.item_id]?.selected || false;
+                            const qty = orderItems[item.item_id]?.quantity || 10;
+                            return (
+                              <tr key={item.item_id} style={{ borderTop: `1px solid ${c.border}`, background: isSelected ? c.surfaceMuted : "transparent" }}>
+                                <td style={{ padding: "8px 10px" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) =>
+                                      setOrderItems((prev) => ({
+                                        ...prev,
+                                        [item.item_id]: { ...prev[item.item_id], selected: e.target.checked },
+                                      }))
+                                    }
+                                  />
+                                </td>
+                                <td style={{ padding: "8px 10px" }}>
+                                  <div style={{ fontWeight: 600, color: c.text }}>{item.item_name}</div>
+                                  <div style={{ fontSize: 11, color: c.textMuted, fontFamily: "monospace" }}>{item.sku}</div>
+                                </td>
+                                <td style={{ padding: "8px 10px", fontWeight: 600, color: c.text }}>
+                                  ${Number(item.agreed_price).toFixed(2)}
+                                </td>
+                                <td style={{ padding: "8px 10px" }}>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    disabled={!isSelected}
+                                    value={qty}
+                                    onChange={(e) =>
+                                      setOrderItems((prev) => ({
+                                        ...prev,
+                                        [item.item_id]: { ...prev[item.item_id], quantity: Math.max(1, parseInt(e.target.value, 10) || 1) },
+                                      }))
+                                    }
+                                    style={{
+                                      width: 70,
+                                      padding: "4px 8px",
+                                      borderRadius: 6,
+                                      border: `1px solid ${c.border}`,
+                                      fontSize: 12,
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                  Order Notes / Instructions
+                </label>
+                <textarea
+                  rows={2}
+                  value={poNotes}
+                  onChange={(e) => setPoNotes(e.target.value)}
+                  placeholder="Delivery terms, special instructions..."
+                  style={{
+                    width: "100%",
+                    padding: "8px 11px",
+                    borderRadius: 8,
+                    border: `1px solid ${c.border}`,
+                    background: c.inputBg,
+                    color: c.text,
+                    fontSize: 13,
+                    outline: "none",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              {createModalTotal > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: c.surfaceMuted, borderRadius: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: c.textMuted }}>Total Estimated Order Value:</span>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: "#2E7D32" }}>${createModalTotal.toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: "14px 20px", borderTop: `1px solid ${c.border}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  border: `1px solid ${c.border}`,
+                  background: c.surface,
+                  color: c.text,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submitting || !selectedSupplierId}
+                onClick={handleCreatePO}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: c.accent,
+                  color: "#fff",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: submitting ? "default" : "pointer",
+                  opacity: submitting ? 0.7 : 1,
+                }}
+              >
+                {submitting ? "Creating..." : "Save Purchase Order"}
+              </button>
             </div>
           </div>
         </div>
-      )}
-
-      {/* Delete PO Confirmation Modal */}
-      {poToDelete && (
-        <ConfirmDeleteModal
-          title="Delete Purchase Order"
-          itemName={poToDelete.id}
-          itemType="purchase order"
-          message={`Are you sure you want to delete purchase order ${poToDelete.id} for ${poToDelete.supplierName}? This action cannot be undone.`}
-          onClose={() => setPoToDelete(null)}
-          onConfirm={async () => {
-            const targetId = poToDelete.id;
-            setPoToDelete(null);
-            await handleDeletePO(targetId);
-          }}
-          c={c}
-        />
       )}
     </div>
   );

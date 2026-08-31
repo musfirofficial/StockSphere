@@ -1,6 +1,3 @@
-import os
-
-from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
@@ -13,9 +10,6 @@ from app.models import User, UserRole
 import uuid
 
 router = APIRouter(prefix="/users", tags=["users"])
-
-load_dotenv()
-RECOVARY_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "adminhomerex")
 
 
 # -------------------- New user create endpoint (Admin Only) -------------------- #
@@ -31,7 +25,7 @@ async def create_new_user(
     return new_user
 
 
-# --------------------------- Get all user endpoint -------------------------- #
+# --------------------------- Get all users endpoint -------------------------- #
 @router.get("/", response_model=list[UserResponse])
 async def read_all_users(
     db: AsyncSession = Depends(get_async_session),
@@ -84,59 +78,62 @@ async def update_user(
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Guard: super admin account is immutable — no one can update it, not even itself
-    if target_user.user_name == RECOVARY_ADMIN_USERNAME:
-        raise HTTPException(
-            status_code=403, detail="Super admin account cannot be modified"
-        )
-
-    is_super_admin = current_user.user_name == RECOVARY_ADMIN_USERNAME
     is_admin = current_user.role == UserRole.ADMIN
     is_self = current_user.user_id == target_user.user_id
 
     update_data = user_in.model_dump(exclude_unset=True, exclude_none=True)
-
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    if is_super_admin:
-        # Super admin: can update anyone with full schema (including is_active)
-        pass
+    if is_admin:
+        # Admin updating self: cannot deactivate own account
+        if is_self and user_in.is_active is False:
+            raise HTTPException(
+                status_code=403, detail="You cannot deactivate your own account."
+            )
 
-    elif is_admin:
-        # Regular admin: self-only, cannot deactivate own account
-        if is_self:
-            if user_in.is_active is False:
+        # Admin demoting own role or another admin: check if they are the only remaining active admin
+        if user_in.role is not None and user_in.role != UserRole.ADMIN and target_user.role == UserRole.ADMIN:
+            active_admin_count = await user_crud.get_active_admin_count(db)
+            if active_admin_count <= 1:
                 raise HTTPException(
-                    status_code=403, detail="Admin cannot deactivate their own account"
+                    status_code=400,
+                    detail="Cannot demote the only remaining active Admin account.",
                 )
-        else:
-            # Regular admin updating someone else:
-            # Prevent updating other admins
-            if target_user.role == UserRole.ADMIN:
+
+        # Admin deactivating another admin: check if that admin is the only active admin
+        if not is_self and target_user.role == UserRole.ADMIN and user_in.is_active is False:
+            active_admin_count = await user_crud.get_active_admin_count(db)
+            if active_admin_count <= 1:
                 raise HTTPException(
-                    status_code=403,
-                    detail="Regular administrators cannot update other administrators",
+                    status_code=400,
+                    detail="Cannot deactivate the only remaining active Admin account.",
                 )
 
     else:
-        # Other roles: self-only, no is_active field
+        # Non-admin users: can only update their own profile
         if not is_self:
             raise HTTPException(
                 status_code=403, detail="You can only update your own profile"
             )
-        # Prevent other roles from updating is_active
+        # Non-admin users cannot change role or active status
+        if "role" in update_data:
+            raise HTTPException(
+                status_code=403, detail="You cannot change your own role"
+            )
         if "is_active" in update_data:
             raise HTTPException(
-                status_code=403, detail="You cannot deactivate your self"
+                status_code=403, detail="You cannot change your own active status"
             )
 
     await verify_uniqueness(db, User, user_in, target_user.user_id)
     updated_user = await user_crud.update_user(db, target_user, update_data)
+
     if "is_active" in update_data and update_data["is_active"] is False:
         await auditlog_crud.log_user_deactivated(db, current_user, target_user)
     if "is_active" in update_data and update_data["is_active"] is True:
         await auditlog_crud.log_user_reactivated(db, current_user, target_user)
+
     return updated_user
 
 
@@ -157,61 +154,38 @@ async def change_user_password(
         )
     ),
 ):
-    # variables
-    is_super_admin = current_user.user_name == RECOVARY_ADMIN_USERNAME
-    is_admin = current_user.role == UserRole.ADMIN and not is_super_admin
-    is_self = current_user.user_id == user_id
-
-    # target_user
     target_user = await user_crud.get_user_by_user_id(db, user_id=user_id)
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Chnage own password
+    is_admin = current_user.role == UserRole.ADMIN
+    is_self = current_user.user_id == user_id
+
+    # Non-admins can only change their own password
+    if not is_self and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to change this user's password.",
+        )
+
+    # Self password change requires verifying current password
     if is_self:
-        if is_super_admin:
-            raise HTTPException(
-                status_code=403, detail="Super admin account cannot be modified"
-            )
-    # Change other's password
-    else:
-        if is_super_admin:
-            pass  # Super admin can change anyone's password
-        elif is_admin:
-            if target_user.role == UserRole.ADMIN:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Admins cannot change another admin's password.",
-                )
-        else:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not authorized to change this user's password.",
-            )
-
-    # require current password
-    requires_current_password = is_self and not is_super_admin
-
-    if requires_current_password:
-        # Ensure current password was actually sent
         if not user_in.current_password:
             raise HTTPException(status_code=400, detail="Current password is required.")
 
-        # Prevent setting the exact same password
         if user_in.new_password == user_in.current_password:
             raise HTTPException(
                 status_code=400,
                 detail="New password cannot be the same as the current password.",
             )
 
-        # Verify authenticity against current user's actual hash
         if not verify_password(user_in.current_password, current_user.password_hash):
             raise HTTPException(
                 status_code=400, detail="Current password is incorrect."
             )
 
     target_user.password_hash = hash_password(user_in.new_password)
-    target_user.refresh_token = None
+    target_user.refresh_token = None  # Invalidate active session tokens
 
     try:
         await db.commit()
@@ -221,45 +195,35 @@ async def change_user_password(
             status_code=500, detail="Failed to update password in database"
         )
 
-    # --- Database Commit & Token Invalidation ---
     await auditlog_crud.changed_password(db, current_user, target_user)
     return {"detail": "Password updated successfully. Please log in again."}
 
 
-# ------------------------- Enddpoint for delete user ------------------------ #
+# ------------------------- Endpoint for delete user ------------------------ #
 @router.delete("/{user_id}", status_code=204)
 async def delete_existing_user(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(RoleChecker([UserRole.ADMIN])),
 ):
-    # 1. Fetch the user to be deleted
     target_user = await user_crud.get_user_by_user_id(db, user_id)
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 2. Prevent ANY user from deleting themselves
+    # Prevent ANY user from deleting themselves
     if current_user.user_id == target_user.user_id:
         raise HTTPException(
             status_code=403, detail="You cannot delete your own account"
         )
 
-    # 3. Prevent ANYONE from deleting the hardcoded admin
-    if target_user.user_name == RECOVARY_ADMIN_USERNAME:
-        raise HTTPException(
-            status_code=403,
-            detail="The system recovery admin account cannot be deleted",
-        )
-
-    # 4. Enforce role restrictions for regular administrators
-    if current_user.user_name != RECOVARY_ADMIN_USERNAME:
-        # Regular admins cannot delete other admins
-        if target_user.role == UserRole.ADMIN:
+    # Last remaining admin guard
+    if target_user.role == UserRole.ADMIN:
+        active_admin_count = await user_crud.get_active_admin_count(db)
+        if active_admin_count <= 1:
             raise HTTPException(
-                status_code=403,
-                detail="Regular administrators cannot delete other administrators",
+                status_code=400,
+                detail="Cannot delete the only remaining Admin account in the system.",
             )
 
-    # 5. If all checks pass, proceed with deletion
     await user_crud.delete_user(db, user_id=user_id)
     await auditlog_crud.log_user_deleted(db, current_user, target_user)

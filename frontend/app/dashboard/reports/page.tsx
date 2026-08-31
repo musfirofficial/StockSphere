@@ -2,31 +2,39 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
-import { FileDown, Printer } from "lucide-react";
+  FileDown,
+  Printer,
+  History,
+  Calendar,
+  Search,
+  Filter,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  ArrowUpDown,
+  Download,
+  Trash2,
+  X,
+  FileSpreadsheet,
+  Building2,
+  Package,
+  Layers,
+  ArrowRight,
+  RefreshCw,
+} from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useTheme } from "../ThemeContext";
 import { apiFetch } from "@/lib/api";
+import { Pagination } from "@/components/ui";
 
 const REPORT_TYPES = [
-  { id: "OVERALL_SUMMARY", label: "Overall Summary", isEnabled: true },
-  { id: "LOW_STOCK", label: "Stock Alert Report", isEnabled: true },
-  { id: "CATEGORY_WISE", label: "Category Report", isEnabled: true },
-  { id: "TRANSACTION", label: "Transaction Report", isEnabled: false },
-  { id: "STOCK_MOVEMENT", label: "Stock Velocity (ABC)", isEnabled: false },
-  { id: "SUPPLIER", label: "Supplier Report", isEnabled: false },
+  { id: "OVERALL_SUMMARY", label: "Overall Inventory Summary", icon: Package, desc: "Executive stock levels, valuations, and top assets" },
+  { id: "LOW_STOCK", label: "Stock Alert & Replenishment", icon: AlertTriangle, desc: "Urgent reorder items, shortages, and supplier impact" },
+  { id: "CATEGORY_WISE", label: "Category Valuation & Margins", icon: Layers, desc: "Inventory capital distribution and margin analysis" },
+  { id: "TRANSACTION", label: "Transaction Audit Ledger", icon: ArrowUpDown, desc: "Detailed chronological ledger of all stock movements" },
+  { id: "STOCK_MOVEMENT", label: "Stock Movement & Velocity (ABC)", icon: Clock, desc: "Inventory turnover rates and velocity classification" },
+  { id: "SUPPLIER", label: "Supplier Spend & Fulfillment", icon: Building2, desc: "Supplier procurement spend and PO completion scorecard" },
 ];
 
 const formatDateInput = (d: Date): string => {
@@ -54,11 +62,22 @@ export default function ReportsPage() {
     return formatDateInput(new Date());
   });
 
-  // API Data State
+  // Current Generated Report & Payload
+  const [currentReportRecord, setCurrentReportRecord] = useState<any>(null);
   const [reportData, setReportData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<boolean>(false);
+
+  // Historical Reports Drawer State
+  const [historyOpen, setHistoryOpen] = useState<boolean>(false);
+  const [historyReports, setHistoryReports] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+
+  // Table filtering & pagination inside report views
+  const [tableSearch, setTableSearch] = useState<string>("");
+  const [page, setPage] = useState<number>(1);
+  const PAGE_SIZE = 12;
 
   // Validation: Date Range <= 365 Days
   const dateError = useMemo(() => {
@@ -77,29 +96,48 @@ export default function ReportsPage() {
     return "";
   }, [startDate, endDate]);
 
-  // Fetch Report Data from POST /reports/
-  const fetchReport = async () => {
-    const isCategory = activeTab === "CATEGORY_WISE";
-    if (!isCategory && dateError) return;
-    if (
-      activeTab !== "OVERALL_SUMMARY" &&
-      activeTab !== "LOW_STOCK" &&
-      activeTab !== "CATEGORY_WISE"
-    )
-      return;
+  // Load Historical Reports from backend
+  const loadHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const data = await apiFetch<any[]>("/reports/");
+      setHistoryReports(data || []);
+    } catch (err) {
+      console.error("Failed to load reports history:", err);
+      setHistoryReports([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  // Set Preset Date Ranges
+  const setPresetRange = (days: number) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days);
+    setStartDate(formatDateInput(start));
+    setEndDate(formatDateInput(end));
+  };
+
+  // Generate / Fetch Report from Backend
+  const handleGenerateReport = async () => {
+    if (activeTab !== "CATEGORY_WISE" && dateError) return;
 
     setLoading(true);
     setError("");
+    setTableSearch("");
+    setPage(1);
 
     try {
       const nowStr = new Date().toISOString().replace(/[^a-zA-Z0-9]/g, "");
       const tabLabel =
-        activeTab === "OVERALL_SUMMARY"
-          ? "OverallSummary"
-          : activeTab === "LOW_STOCK"
-            ? "StockAlert"
-            : "CategoryReport";
-      const reportName = `${tabLabel}${nowStr.slice(0, 14)}`;
+        REPORT_TYPES.find((t) => t.id === activeTab)?.label.replace(/\s+/g, "_") ||
+        "Report";
+      const reportName = `${tabLabel}_${nowStr.slice(0, 14)}`;
 
       const payload = {
         report_name: reportName,
@@ -114,25 +152,61 @@ export default function ReportsPage() {
         body: JSON.stringify(payload),
       });
 
-      if (res && res.data) {
+      if (res) {
+        setCurrentReportRecord(res.report);
         setReportData(res.data);
-      } else {
-        setReportData(null);
+        loadHistory();
       }
     } catch (err: any) {
-      console.error("Failed to fetch report:", err);
-      setError(err.message || "Failed to load report data from server.");
+      console.error("Failed to generate report:", err);
+      setError(err.message || "Failed to generate report.");
     } finally {
       setLoading(false);
     }
   };
 
+  // Auto generate on initial mount or tab change
   useEffect(() => {
-    fetchReport();
+    handleGenerateReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, startDate, endDate]);
+  }, [activeTab]);
 
-  // PDF Generation Handler using html2canvas & jsPDF
+  // Load a historical report
+  const handleViewHistoricalReport = async (repId: string) => {
+    setLoading(true);
+    setError("");
+    setTableSearch("");
+    setPage(1);
+    try {
+      const res = await apiFetch<any>(`/reports/${repId}`);
+      if (res) {
+        setCurrentReportRecord(res.report);
+        setReportData(res.data);
+        setActiveTab(res.report.report_type);
+        setHistoryOpen(false);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to load historical report.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete a historical report
+  const handleDeleteReport = async (repId: string) => {
+    if (!confirm("Are you sure you want to delete this historical report record?")) return;
+    try {
+      await apiFetch(`/reports/${repId}`, { method: "DELETE" });
+      loadHistory();
+      if (currentReportRecord?.report_id === repId) {
+        setCurrentReportRecord(null);
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to delete report.");
+    }
+  };
+
+  // PDF Export
   const handleGeneratePDF = async () => {
     if (!reportRef.current) return;
     setIsGeneratingPDF(true);
@@ -151,16 +225,15 @@ export default function ReportsPage() {
       const pageHeight = pdf.internal.pageSize.getHeight();
       const margin = 12;
 
-      // ── Simple Text Header (PDF Only) ──
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(16);
       pdf.setTextColor(20, 20, 20);
-      pdf.text("Homerex", margin, 16);
+      pdf.text("StockSphere Enterprise Inventory", margin, 16);
 
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
       pdf.setTextColor(100, 100, 100);
-      pdf.text("Batticaloa, Sri Lanka  |  077 777 7777", margin, 22);
+      pdf.text(`Generated: ${new Date().toLocaleString()}`, margin, 22);
 
       const activeReportLabel =
         REPORT_TYPES.find((t) => t.id === activeTab)?.label || "Report";
@@ -174,848 +247,1165 @@ export default function ReportsPage() {
       pdf.setTextColor(120, 120, 120);
       const periodText =
         activeTab === "CATEGORY_WISE"
-          ? "Overall Inventory Snapshot"
-          : `Period: ${startDate} to ${endDate}`;
+          ? "Complete Category Snapshot"
+          : `Date Range: ${startDate} to ${endDate}`;
       pdf.text(periodText, pageWidth - margin, 22, { align: "right" });
 
-      // Horizontal Divider
       pdf.setDrawColor(220, 220, 220);
       pdf.setLineWidth(0.4);
       pdf.line(margin, 26, pageWidth - margin, 26);
 
-      // ── Content Image Placement ──
       const startY = 30;
       const contentWidth = pageWidth - margin * 2;
       const contentHeight = (canvas.height * contentWidth) / canvas.width;
 
       pdf.addImage(imgData, "PNG", margin, startY, contentWidth, contentHeight);
 
-      // ── Footer ──
-      pdf.setFontSize(8);
-      pdf.setTextColor(150, 150, 150);
-      pdf.text(
-        "Homerex Inventory Management System — Page 1 of 1",
-        pageWidth / 2,
-        pageHeight - 6,
-        { align: "center" }
-      );
-
       const reportTitle = activeReportLabel.replace(/\s+/g, "_");
-      pdf.save(`Homerex_${reportTitle}_${startDate}.pdf`);
+      pdf.save(`StockSphere_${reportTitle}_${startDate}.pdf`);
     } catch (err) {
-      console.error("Failed to generate PDF:", err);
-      alert("Failed to generate PDF. Please try again.");
+      console.error("Failed to export PDF:", err);
+      alert("Failed to export PDF.");
     } finally {
       setIsGeneratingPDF(false);
     }
   };
 
+  // CSV Export Handler
+  const handleExportCSV = () => {
+    if (!reportData) return;
+    let csvRows: string[] = [];
+    const title = REPORT_TYPES.find((t) => t.id === activeTab)?.label || "Report";
+
+    if (activeTab === "OVERALL_SUMMARY") {
+      csvRows.push(`"StockSphere - ${title}"`);
+      csvRows.push(`"Total In Stock Units","${reportData.total_items_in_stock}"`);
+      csvRows.push(`"Total Unique Items","${reportData.total_unique_items}"`);
+      csvRows.push(`"Inventory Cost Worth ($)","${reportData.inventory_cost_worth}"`);
+      csvRows.push(`"Selling Worth ($)","${reportData.selling_worth}"`);
+      csvRows.push(`"Potential Gross Profit ($)","${reportData.potential_profit}"`);
+      csvRows.push(`"Sell-Through Rate (%)","${reportData.sell_through_rate}%"`);
+      csvRows.push("");
+      csvRows.push(`"Top Valuable Stock Items"`);
+      csvRows.push(`"Item Name","SKU","Category","Quantity","Unit Cost","Selling Price","Total Cost Worth","Total Selling Worth"`);
+      (reportData.top_valuable_items || []).forEach((i: any) => {
+        csvRows.push(`"${i.item_name}","${i.sku}","${i.category_name}","${i.quantity}","${i.cost_price}","${i.selling_price}","${i.total_cost_worth}","${i.total_selling_worth}"`);
+      });
+    } else if (activeTab === "LOW_STOCK") {
+      csvRows.push(`"StockSphere - ${title}"`);
+      csvRows.push(`"Global Critical Alerts","${reportData.global_critical_alerts}"`);
+      csvRows.push(`"Global Low Stock Alerts","${reportData.global_low_stock_alerts}"`);
+      csvRows.push(`"Estimated Restock Cost ($)","${reportData.estimated_restock_cost}"`);
+      csvRows.push("");
+      csvRows.push(`"Replenishment Action List"`);
+      csvRows.push(`"Item Name","SKU","Category","In Stock","Reorder Level","Suggested Order","Unit Cost","Est Restock Cost","Supplier"`);
+      [...(reportData.critical_items_list || []), ...(reportData.low_stock_items_list || [])].forEach((i: any) => {
+        csvRows.push(`"${i.item_name}","${i.sku}","${i.category_name}","${i.quantity_in_stock}","${i.reorder_level}","${i.reorder_quantity}","${i.cost_price}","${i.estimated_restock_cost}","${i.supplier_name}"`);
+      });
+    } else if (activeTab === "CATEGORY_WISE") {
+      csvRows.push(`"StockSphere - ${title}"`);
+      csvRows.push(`"Category Name","Item Count","Total Stock Units","Cost Valuation ($)","Retail Valuation ($)","Gross Margin (%)","Share of Stock (%)"`);
+      (reportData.categories || []).forEach((c: any) => {
+        csvRows.push(`"${c.category_name}","${c.item_count}","${c.total_units}","${c.cost_value}","${c.stock_value}","${c.margin_percentage}%","${c.space_used_percentage}%"`);
+      });
+    } else if (activeTab === "TRANSACTION") {
+      csvRows.push(`"StockSphere - ${title}"`);
+      csvRows.push(`"Date","Transaction ID","Item Name","SKU","Type","Quantity","Unit Price","Total Value","Operator","Reason / Notes"`);
+      (reportData.transactions || []).forEach((t: any) => {
+        csvRows.push(`"${new Date(t.transaction_date).toLocaleString()}","${t.transaction_id}","${t.item_name}","${t.sku}","${t.transaction_type}","${t.quantity}","${t.unit_price}","${t.total_amount}","${t.operator_name}","${t.reason || t.note || ''}"`);
+      });
+    } else if (activeTab === "STOCK_MOVEMENT") {
+      csvRows.push(`"StockSphere - ${title}"`);
+      csvRows.push(`"Item Name","SKU","Category","Opening Stock","Total Inward","Total Outward","Closing Stock","Net Change","Turnover Rate (%)","Velocity Class"`);
+      (reportData.items || []).forEach((i: any) => {
+        csvRows.push(`"${i.item_name}","${i.sku}","${i.category_name}","${i.opening_stock}","${i.total_inflow}","${i.total_outflow}","${i.closing_stock}","${i.net_change}","${i.turnover_rate}%","${i.velocity_tier}"`);
+      });
+    } else if (activeTab === "SUPPLIER") {
+      csvRows.push(`"StockSphere - ${title}"`);
+      csvRows.push(`"Supplier Name","Contact Person","Phone","Email","Active","Products Sourced","Total Spend ($)","Completed POs","Pending POs","Fulfillment Rate (%)"`);
+      (reportData.suppliers || []).forEach((s: any) => {
+        csvRows.push(`"${s.supplier_name}","${s.contact_person}","${s.phone}","${s.email}","${s.is_active ? 'Active' : 'Inactive'}","${s.total_items_supplied}","${s.total_purchase_spend}","${s.completed_pos}","${s.pending_pos}","${s.fulfillment_rate}%"`);
+      });
+    }
+
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `StockSphere_${title.replace(/\s+/g, "_")}_${startDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* ── Top Header Navigation & Generate PDF Button ── */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 18, width: "100%" }}>
+      {/* ── Top Bar: Selection, Date Range & Actions ── */}
       <div
         style={{
+          background: c.surface,
+          border: `1px solid ${c.border}`,
+          borderRadius: 12,
+          padding: "16px 20px",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          flexWrap: "wrap",
-          borderBottom: `1px solid ${c.border}`,
-          paddingBottom: 12,
+          flexDirection: "column",
+          gap: 14,
         }}
       >
-        {/* Dropdown Menu for Report Selection */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: c.textMuted }}>
-            Report Type:
-          </span>
-          <select
-            value={activeTab}
-            onChange={(e) => setActiveTab(e.target.value)}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 8,
-              border: `1px solid ${c.border}`,
-              background: c.surface,
-              color: c.text,
-              fontSize: 13.5,
-              fontWeight: 600,
-              outline: "none",
-              cursor: "pointer",
-              fontFamily: "inherit",
-              minWidth: 220,
-            }}
-          >
-            {REPORT_TYPES.map((t) => (
-              <option
-                key={t.id}
-                value={t.id}
-                disabled={!t.isEnabled}
-                style={{
-                  color: t.isEnabled ? c.text : c.textFaint,
-                  background: c.surface,
-                }}
-              >
-                {t.label} {!t.isEnabled ? "(Under Development)" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          {/* Report Type Selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 280 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: c.textMuted }}>Report:</span>
+            <select
+              value={activeTab}
+              onChange={(e) => setActiveTab(e.target.value)}
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.inputBg,
+                color: c.text,
+                fontSize: 13.5,
+                fontWeight: 600,
+                outline: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                flex: 1,
+                maxWidth: 340,
+              }}
+            >
+              {REPORT_TYPES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        {/* Generate PDF Button */}
-        {(activeTab === "OVERALL_SUMMARY" ||
-          activeTab === "LOW_STOCK" ||
-          activeTab === "CATEGORY_WISE") && (
+          {/* Action Buttons */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
-              onClick={handleGeneratePDF}
-              disabled={
-                isGeneratingPDF ||
-                loading ||
-                (activeTab !== "CATEGORY_WISE" && !!dateError)
-              }
+              onClick={() => setHistoryOpen(!historyOpen)}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 7,
-                padding: "8px 16px",
+                gap: 6,
+                padding: "8px 13px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 12.5,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <History size={14} />
+              <span>Report History ({historyReports.length})</span>
+            </button>
+
+            <button
+              onClick={handleExportCSV}
+              disabled={loading || !reportData}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 13px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 12.5,
+                fontWeight: 500,
+                cursor: loading || !reportData ? "default" : "pointer",
+                opacity: loading || !reportData ? 0.6 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              <FileSpreadsheet size={14} />
+              <span>Export CSV</span>
+            </button>
+
+            <button
+              onClick={handleGeneratePDF}
+              disabled={isGeneratingPDF || loading || !reportData}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 14px",
                 borderRadius: 8,
                 border: "none",
                 background: c.accent,
-                color: "#ffffff",
-                fontSize: 13,
+                color: "#fff",
+                fontSize: 12.5,
                 fontWeight: 600,
                 cursor: isGeneratingPDF || loading ? "default" : "pointer",
                 opacity: isGeneratingPDF || loading ? 0.6 : 1,
                 fontFamily: "inherit",
-                flexShrink: 0,
               }}
             >
-              <FileDown size={15} />
-              {isGeneratingPDF ? "Generating PDF..." : "Generate PDF"}
+              <FileDown size={14} />
+              <span>{isGeneratingPDF ? "Exporting..." : "Download PDF"}</span>
             </button>
-          )}
+          </div>
+        </div>
+
+        {/* Date Range Selector & Presets */}
+        {activeTab !== "CATEGORY_WISE" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 12,
+              borderTop: `1px solid ${c.border}`,
+              paddingTop: 12,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12.5, color: c.textMuted, fontWeight: 500 }}>Date Range:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                style={{
+                  padding: "5px 9px",
+                  borderRadius: 6,
+                  border: `1px solid ${c.border}`,
+                  background: c.inputBg,
+                  color: c.text,
+                  fontSize: 12.5,
+                }}
+              />
+              <span style={{ fontSize: 12, color: c.textMuted }}>to</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                style={{
+                  padding: "5px 9px",
+                  borderRadius: 6,
+                  border: `1px solid ${c.border}`,
+                  background: c.inputBg,
+                  color: c.text,
+                  fontSize: 12.5,
+                }}
+              />
+
+              <button
+                onClick={handleGenerateReport}
+                disabled={loading || !!dateError}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: c.accent,
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: loading || !!dateError ? "default" : "pointer",
+                  opacity: loading || !!dateError ? 0.6 : 1,
+                  marginLeft: 6,
+                }}
+              >
+                <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+                <span>Update Report</span>
+              </button>
+            </div>
+
+            {/* Quick Presets */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {[
+                { label: "7 Days", days: 7 },
+                { label: "30 Days", days: 30 },
+                { label: "90 Days", days: 90 },
+                { label: "1 Year", days: 365 },
+              ].map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => setPresetRange(p.days)}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 6,
+                    border: `1px solid ${c.border}`,
+                    background: c.surfaceMuted,
+                    color: c.textMuted,
+                    fontSize: 11.5,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {dateError && (
+          <div style={{ fontSize: 12, color: c.danger, fontWeight: 500 }}>
+            {dateError}
+          </div>
+        )}
       </div>
 
-      {/* ── Disabled / Under Development Placeholder ── */}
-      {activeTab !== "OVERALL_SUMMARY" &&
-        activeTab !== "LOW_STOCK" &&
-        activeTab !== "CATEGORY_WISE" && (
+      {/* ── Historical Reports Drawer ── */}
+      {historyOpen && (
+        <div
+          style={{
+            background: c.surface,
+            border: `1px solid ${c.border}`,
+            borderRadius: 12,
+            padding: "16px 20px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: c.text, margin: 0 }}>
+              Generated Reports Audit Log
+            </h3>
+            <button
+              onClick={() => setHistoryOpen(false)}
+              style={{ background: "none", border: "none", color: c.textMuted, cursor: "pointer" }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                  <th style={{ padding: "8px 12px" }}>Report Name</th>
+                  <th style={{ padding: "8px 12px" }}>Type</th>
+                  <th style={{ padding: "8px 12px" }}>Date Window</th>
+                  <th style={{ padding: "8px 12px" }}>Generated By</th>
+                  <th style={{ padding: "8px 12px" }}>Timestamp</th>
+                  <th style={{ padding: "8px 12px", textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingHistory ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: 20, textAlign: "center", color: c.textMuted }}>
+                      Loading report history...
+                    </td>
+                  </tr>
+                ) : historyReports.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: 20, textAlign: "center", color: c.textFaint }}>
+                      No reports generated yet.
+                    </td>
+                  </tr>
+                ) : (
+                  historyReports.map((rep) => (
+                    <tr key={rep.report_id} style={{ borderTop: `1px solid ${c.border}` }}>
+                      <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>
+                        {rep.report_name}
+                      </td>
+                      <td style={{ padding: "9px 12px", color: c.textMuted }}>
+                        {REPORT_TYPES.find((t) => t.id === rep.report_type)?.label || rep.report_type}
+                      </td>
+                      <td style={{ padding: "9px 12px", color: c.textMuted, fontSize: 11.5 }}>
+                        {new Date(rep.start_date).toLocaleDateString()} – {new Date(rep.end_date).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: "9px 12px" }}>
+                        <span style={{ color: "#2563EB", fontWeight: 600 }}>
+                          @{rep.operator_name || "System"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "9px 12px", color: c.textFaint }}>
+                        {new Date(rep.generated_at).toLocaleString()}
+                      </td>
+                      <td style={{ padding: "9px 12px", textAlign: "right" }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <button
+                            onClick={() => handleViewHistoricalReport(rep.report_id)}
+                            style={{
+                              padding: "4px 8px",
+                              borderRadius: 6,
+                              border: `1px solid ${c.border}`,
+                              background: c.surfaceMuted,
+                              color: c.accent,
+                              fontSize: 11.5,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleDeleteReport(rep.report_id)}
+                            style={{
+                              padding: "4px",
+                              border: "none",
+                              background: "none",
+                              color: c.danger || "#DC2626",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Printable / Screen Report Content ── */}
+      <div ref={reportRef} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {loading ? (
           <div
             style={{
               background: c.surface,
               border: `1px solid ${c.border}`,
-              borderRadius: 14,
-              padding: "50px 20px",
+              borderRadius: 12,
+              padding: "48px 20px",
               textAlign: "center",
               color: c.textMuted,
-              fontSize: 14,
             }}
           >
-            Under development
+            Generating report data...
           </div>
-        )}
-
-      {/* ── Tabs 1, 2, 3: Dynamic API Report Content ── */}
-      {(activeTab === "OVERALL_SUMMARY" ||
-        activeTab === "LOW_STOCK" ||
-        activeTab === "CATEGORY_WISE") && (
-          <div ref={reportRef} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            {/* Loading / Error Indicators */}
-            {loading && (
-              <div style={{ textAlign: "center", padding: "30px 0", color: c.textMuted, fontSize: 13 }}>
-                Loading report data...
-              </div>
-            )}
-
-            {error && (
-              <div style={{ padding: 14, borderRadius: 8, background: c.dangerSoft, color: c.danger, fontSize: 13 }}>
-                {error}
-              </div>
-            )}
-
-            {/* 1. OVERALL SUMMARY DATA VIEW */}
-            {activeTab === "OVERALL_SUMMARY" && reportData && !loading && (
-              <>
-                {/* First: 3 Cards */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: 14,
-                  }}
-                >
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 18,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 6 }}>
-                      Total Items in Stock
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text }}>
-                      {reportData.total_items_in_stock ?? 0}
+        ) : error ? (
+          <div
+            style={{
+              background: c.surface,
+              border: `1px solid ${c.border}`,
+              borderRadius: 12,
+              padding: "32px 20px",
+              textAlign: "center",
+              color: c.danger,
+            }}
+          >
+            {error}
+          </div>
+        ) : !reportData ? (
+          <div
+            style={{
+              background: c.surface,
+              border: `1px solid ${c.border}`,
+              borderRadius: 12,
+              padding: "48px 20px",
+              textAlign: "center",
+              color: c.textFaint,
+            }}
+          >
+            No report data available.
+          </div>
+        ) : (
+          <>
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {/* 1. OVERALL INVENTORY SUMMARY REPORT VIEW                      */}
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {activeTab === "OVERALL_SUMMARY" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Metric Summary Cards */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Stock Units</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      {Number(reportData.total_items_in_stock || 0).toLocaleString()}
                     </div>
                     <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                      Active: {reportData.active_items_count ?? 0} ({reportData.active_items_percentage ?? 0}%)
+                      {reportData.total_unique_items} Unique SKUs ({reportData.active_items_count} Active)
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 18,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 6 }}>
-                      Inventory Cost Worth
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Inventory Cost Worth</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      ${Number(reportData.inventory_cost_worth || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text }}>
-                      Rs {Number(reportData.inventory_cost_worth ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Asset investment valuation</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Estimated Retail Worth</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      ${Number(reportData.selling_worth || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                      Total cost evaluation
+                    <div style={{ fontSize: 11.5, color: "#2E7D32", marginTop: 4 }}>
+                      +${Number(reportData.potential_profit || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} potential margin
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 18,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 6 }}>
-                      Selling Worth
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text }}>
-                      Rs {Number(reportData.selling_worth ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Sell-Through Velocity</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.accent, marginTop: 4 }}>
+                      {reportData.sell_through_rate}%
                     </div>
                     <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                      Total selling valuation
+                      Period Sales vs Receipts
                     </div>
                   </div>
                 </div>
 
-                {/* Next: Container holding date picker, graph, and sell-through rate */}
-                <div
-                  style={{
-                    background: c.surface,
-                    border: `1px solid ${c.border}`,
-                    borderRadius: 14,
-                    padding: 20,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 20,
-                  }}
-                >
-                  {/* Date Picker Controls */}
-                  <div
-                    data-html2canvas-ignore="true"
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                      borderBottom: `1px solid ${c.border}`,
-                      paddingBottom: 16,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 13, color: c.textMuted, fontWeight: 500 }}>
-                          Start Date:
-                        </span>
-                        <input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: `1px solid ${c.border}`,
-                            background: c.surfaceMuted,
-                            color: c.text,
-                            fontSize: 13,
-                            outline: "none",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 13, color: c.textMuted, fontWeight: 500 }}>
-                          End Date:
-                        </span>
-                        <input
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: `1px solid ${c.border}`,
-                            background: c.surfaceMuted,
-                            color: c.text,
-                            fontSize: 13,
-                            outline: "none",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {dateError && (
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: 6,
-                          background: c.dangerSoft,
-                          color: c.danger,
-                          fontSize: 12.5,
-                          fontWeight: 500,
-                        }}
-                      >
-                        {dateError}
-                      </div>
-                    )}
+                {/* Top Valuable Items Table */}
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, fontWeight: 700, fontSize: 13.5, color: c.text }}>
+                    Top High-Value Stock Assets
                   </div>
-
-                  {/* Graph Visualization */}
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
-                      Monthly Stock In & Out Trend
-                    </div>
-
-                    {(!reportData.chart_data || reportData.chart_data.length === 0) ? (
-                      <div style={{ padding: "30px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
-                        No chart data returned for this period.
-                      </div>
-                    ) : (
-                      <div style={{ width: "100%", height: 260 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={reportData.chart_data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={c.border} opacity={0.5} />
-                            <XAxis dataKey="month" tick={{ fontSize: 11, fill: c.textMuted }} />
-                            <YAxis tick={{ fontSize: 11, fill: c.textMuted }} />
-                            <Tooltip
-                              contentStyle={{
-                                background: c.surface,
-                                borderColor: c.border,
-                                borderRadius: 8,
-                                fontSize: 12,
-                                color: c.text,
-                              }}
-                            />
-                            <Legend />
-                            <Bar dataKey="inventory_value" name="Stock In Value (Rs)" fill={c.accent} radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="sales_value" name="Stock Out Value (Rs)" fill={c.warn || "#e6a23c"} radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sell-Through Rate Card */}
-                  <div
-                    style={{
-                      background: c.surfaceMuted,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 12,
-                      padding: "16px 20px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <span style={{ fontSize: 13.5, fontWeight: 500, color: c.textMuted }}>
-                      Sell-Through Rate:
-                    </span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: c.text }}>
-                      {reportData.sell_through_rate ?? 0}%
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* 2. STOCK ALERT REPORT DATA VIEW */}
-            {activeTab === "LOW_STOCK" && reportData && !loading && (
-              <>
-                {/* First: 3 Global Cards (Critical, Low Stock, Est Restock Cost) */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: 14,
-                  }}
-                >
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 18,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 6 }}>
-                      Global Critical Alerts
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: c.danger || c.text }}>
-                      {reportData.global_critical_alerts ?? 0}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                      Out of stock items
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 18,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 6 }}>
-                      Global Low Stock Alerts
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: c.warn || c.text }}>
-                      {reportData.global_low_stock_alerts ?? 0}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                      Below reorder threshold
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 18,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: c.textFaint, marginBottom: 6 }}>
-                      Est. Restock Cost
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text }}>
-                      Rs {Number(reportData.estimated_restock_cost ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
-                      Cost to reach reorder level
-                    </div>
-                  </div>
-                </div>
-
-                {/* Next: Container holding date picker, next card, and graph */}
-                <div
-                  style={{
-                    background: c.surface,
-                    border: `1px solid ${c.border}`,
-                    borderRadius: 14,
-                    padding: 20,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 20,
-                  }}
-                >
-                  {/* Date Picker Controls */}
-                  <div
-                    data-html2canvas-ignore="true"
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                      borderBottom: `1px solid ${c.border}`,
-                      paddingBottom: 16,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 13, color: c.textMuted, fontWeight: 500 }}>
-                          Start Date:
-                        </span>
-                        <input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: `1px solid ${c.border}`,
-                            background: c.surfaceMuted,
-                            color: c.text,
-                            fontSize: 13,
-                            outline: "none",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 13, color: c.textMuted, fontWeight: 500 }}>
-                          End Date:
-                        </span>
-                        <input
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: `1px solid ${c.border}`,
-                            background: c.surfaceMuted,
-                            color: c.text,
-                            fontSize: 13,
-                            outline: "none",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {dateError && (
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: 6,
-                          background: c.dangerSoft,
-                          color: c.danger,
-                          fontSize: 12.5,
-                          fontWeight: 500,
-                        }}
-                      >
-                        {dateError}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Next Card: Stock Metrics (Resolution Rate & MTTR) */}
-                  <div
-                    style={{
-                      background: c.surfaceMuted,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 12,
-                      padding: "16px 20px",
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                      gap: 16,
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 11.5, color: c.textFaint }}>Resolution Rate</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: c.text, marginTop: 2 }}>
-                        {reportData.period_resolution_rate ?? 0}%
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11.5, color: c.textFaint }}>Avg MTTR (Critical)</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: c.text, marginTop: 2 }}>
-                        {reportData.avg_mttr_critical_hours ?? 0} hrs
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11.5, color: c.textFaint }}>Avg MTTR (Low Stock)</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: c.text, marginTop: 2 }}>
-                        {reportData.avg_mttr_low_stock_hours ?? 0} hrs
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Graph Visualization */}
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
-                      Stock Alert Trends
-                    </div>
-
-                    {(!reportData.chart_data || reportData.chart_data.length === 0) ? (
-                      <div style={{ padding: "30px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
-                        No chart data returned for this period.
-                      </div>
-                    ) : (
-                      <div style={{ width: "100%", height: 260 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={reportData.chart_data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={c.border} opacity={0.5} />
-                            <XAxis dataKey="month" tick={{ fontSize: 11, fill: c.textMuted }} />
-                            <YAxis tick={{ fontSize: 11, fill: c.textMuted }} />
-                            <Tooltip
-                              contentStyle={{
-                                background: c.surface,
-                                borderColor: c.border,
-                                borderRadius: 8,
-                                fontSize: 12,
-                                color: c.text,
-                              }}
-                            />
-                            <Legend />
-                            <Bar dataKey="critical_count" name="Critical Alerts" fill={c.danger || "#B3473C"} radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="low_stock_count" name="Low Stock Alerts" fill={c.warn || "#e6a23c"} radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* 3. CATEGORY REPORT DATA VIEW */}
-            {activeTab === "CATEGORY_WISE" && reportData && !loading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                {/* Top Section: Side-by-side Bar & Pie Charts */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-                    gap: 16,
-                  }}
-                >
-                  {/* Chart 1: Contribution Margin by Category */}
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 20,
-                    }}
-                  >
-                    <div style={{ fontSize: 15, fontWeight: 700, color: c.text }}>
-                      Contribution Margin by Category
-                    </div>
-                    <div style={{ fontSize: 12, color: c.textMuted, marginTop: 2, marginBottom: 16 }}>
-                      Profit margin %
-                    </div>
-
-                    {(!reportData.categories || reportData.categories.length === 0) ? (
-                      <div style={{ padding: "40px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
-                        No category data available.
-                      </div>
-                    ) : (
-                      <div style={{ width: "100%", height: 260 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart
-                            layout="vertical"
-                            data={reportData.categories}
-                            margin={{ top: 5, right: 20, left: 40, bottom: 5 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke={c.border} horizontal={false} />
-                            <XAxis type="number" unit="%" tick={{ fontSize: 11, fill: c.textMuted }} />
-                            <YAxis dataKey="category_name" type="category" tick={{ fontSize: 11, fill: c.textMuted }} width={90} />
-                            <Tooltip
-                              formatter={(value: any) => [`${value}%`, "Margin"]}
-                              contentStyle={{
-                                background: c.surface,
-                                borderColor: c.border,
-                                borderRadius: 8,
-                                fontSize: 12,
-                                color: c.text,
-                              }}
-                            />
-                            <Bar dataKey="margin_percentage" radius={[0, 4, 4, 0]}>
-                              {reportData.categories.map((entry: any, index: number) => {
-                                const colors = [
-                                  "#2d6a4f",
-                                  "#52b788",
-                                  "#b5838d",
-                                  "#d90429",
-                                  "#6c757d",
-                                  "#a5a58d",
-                                ];
-                                return (
-                                  <Cell
-                                    key={`cell-${index}`}
-                                    fill={colors[index % colors.length]}
-                                  />
-                                );
-                              })}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Chart 2: Warehouse Space by Category */}
-                  <div
-                    style={{
-                      background: c.surface,
-                      border: `1px solid ${c.border}`,
-                      borderRadius: 14,
-                      padding: 20,
-                    }}
-                  >
-                    <div style={{ fontSize: 15, fontWeight: 700, color: c.text }}>
-                      Warehouse Space by Category
-                    </div>
-                    <div style={{ fontSize: 12, color: c.textMuted, marginTop: 2, marginBottom: 16 }}>
-                      % of physical space occupied
-                    </div>
-
-                    {(!reportData.categories || reportData.categories.length === 0) ? (
-                      <div style={{ padding: "40px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
-                        No category data available.
-                      </div>
-                    ) : (
-                      <div style={{ width: "100%", height: 280 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
-                            <Pie
-                              data={reportData.categories}
-                              dataKey="space_used_percentage"
-                              nameKey="category_name"
-                              cx="50%"
-                              cy="42%"
-                              innerRadius={40}
-                              outerRadius={70}
-                              paddingAngle={2}
-                              label={(entry: any) => `${entry.space_used_percentage}%`}
-                            >
-                              {reportData.categories.map((entry: any, index: number) => {
-                                const colors = [
-                                  "#2d6a4f",
-                                  "#52b788",
-                                  "#b5838d",
-                                  "#d90429",
-                                  "#6c757d",
-                                  "#a5a58d",
-                                ];
-                                return (
-                                  <Cell
-                                    key={`pie-cell-${index}`}
-                                    fill={colors[index % colors.length]}
-                                  />
-                                );
-                              })}
-                            </Pie>
-                            <Tooltip
-                              formatter={(value: any) => [`${value}%`, "Space Used"]}
-                              contentStyle={{
-                                background: c.surface,
-                                borderColor: c.border,
-                                borderRadius: 8,
-                                fontSize: 12,
-                                color: c.text,
-                              }}
-                            />
-                            <Legend
-                              verticalAlign="bottom"
-                              align="center"
-                              iconType="circle"
-                              wrapperStyle={{
-                                fontSize: 11,
-                                color: c.textMuted,
-                                paddingTop: 12,
-                              }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Bottom Section: Category Value Overview Table */}
-                <div
-                  style={{
-                    background: c.surface,
-                    border: `1px solid ${c.border}`,
-                    borderRadius: 14,
-                    padding: 20,
-                  }}
-                >
-                  <div style={{ fontSize: 15, fontWeight: 700, color: c.text, marginBottom: 16 }}>
-                    Category Value Overview
-                  </div>
-
                   <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                       <thead>
-                        <tr
-                          style={{
-                            borderBottom: `1px solid ${c.border}`,
-                            color: c.textMuted,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            background: c.surfaceMuted,
-                          }}
-                        >
-                          <th style={{ padding: "10px 14px" }}>Category</th>
-                          <th style={{ padding: "10px 14px" }}>Stock Value</th>
-                          <th style={{ padding: "10px 14px" }}>Margin %</th>
-                          <th style={{ padding: "10px 14px" }}>Space Used</th>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Item Name</th>
+                          <th style={{ padding: "8px 12px" }}>SKU</th>
+                          <th style={{ padding: "8px 12px" }}>Category</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>In Stock</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Cost Price</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Selling Price</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Cost Worth</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Retail Worth</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.categories && reportData.categories.length > 0 ? (
-                          reportData.categories.map((cat: any, idx: number) => {
-                            const colors = [
-                              "#2d6a4f",
-                              "#52b788",
-                              "#b5838d",
-                              "#d90429",
-                              "#6c757d",
-                              "#a5a58d",
-                            ];
-                            const color = colors[idx % colors.length];
-
-                            return (
-                              <tr
-                                key={cat.category_id || idx}
-                                style={{
-                                  borderBottom: `1px solid ${c.border}`,
-                                  fontSize: 13,
-                                  color: c.text,
-                                }}
-                              >
-                                <td style={{ padding: "12px 14px", fontWeight: 600 }}>
-                                  <span
-                                    style={{
-                                      display: "inline-block",
-                                      width: 10,
-                                      height: 10,
-                                      borderRadius: 2,
-                                      background: color,
-                                      marginRight: 8,
-                                    }}
-                                  />
-                                  {cat.category_name}
-                                </td>
-                                <td style={{ padding: "12px 14px", fontWeight: 600 }}>
-                                  Rs {Number(cat.stock_value || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                                </td>
-                                <td style={{ padding: "12px 14px" }}>
-                                  {cat.margin_percentage}%
-                                </td>
-                                <td style={{ padding: "12px 14px" }}>
-                                  {cat.space_used_percentage}%
-                                </td>
-                              </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td
-                              colSpan={4}
-                              style={{ padding: "20px", textAlign: "center", color: c.textFaint, fontSize: 13 }}
-                            >
-                              No category overview metrics found.
-                            </td>
+                        {(reportData.top_valuable_items || []).map((item: any, idx: number) => (
+                          <tr key={idx} style={{ borderTop: `1px solid ${c.border}` }}>
+                            <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>{item.item_name}</td>
+                            <td style={{ padding: "9px 12px", fontFamily: "monospace", color: c.textMuted }}>{item.sku}</td>
+                            <td style={{ padding: "9px 12px", color: c.textMuted }}>{item.category_name}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600 }}>{item.quantity}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>${Number(item.cost_price).toFixed(2)}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 500 }}>${Number(item.selling_price).toFixed(2)}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>${Number(item.total_cost_worth).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: "#2E7D32" }}>${Number(item.total_selling_worth).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                           </tr>
-                        )}
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Category Summary Breakdown */}
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, fontWeight: 700, fontSize: 13.5, color: c.text }}>
+                    Category Valuation Distribution
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Category Name</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Unique Items</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Units in Stock</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Category Worth</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(reportData.category_summary || []).map((cat: any, idx: number) => (
+                          <tr key={idx} style={{ borderTop: `1px solid ${c.border}` }}>
+                            <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>{cat.category_name}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>{cat.item_count}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600 }}>{Number(cat.stock_qty).toLocaleString()}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>${Number(cat.stock_value).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
                 </div>
               </div>
             )}
-          </div>
+
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {/* 2. STOCK ALERT & REPLENISHMENT REPORT VIEW                   */}
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {activeTab === "LOW_STOCK" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Metric Summary Cards */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Out of Stock (Critical)</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#DC2626", marginTop: 4 }}>
+                      {reportData.global_critical_alerts}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Immediate restock required</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Low Stock Alerts</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#EA580C", marginTop: 4 }}>
+                      {reportData.global_low_stock_alerts}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Below safety reorder threshold</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Estimated Restock Capital</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      ${Number(reportData.estimated_restock_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Funds needed for target reorder levels</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Period Resolution Rate</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#2E7D32", marginTop: 4 }}>
+                      {reportData.period_resolution_rate}%
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>
+                      Avg MTTR: {reportData.avg_mttr_critical_hours}h (Critical)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Replenishment Action Items Table */}
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, fontWeight: 700, fontSize: 13.5, color: c.text }}>
+                    Items Awaiting Replenishment & Purchase Orders
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Status</th>
+                          <th style={{ padding: "8px 12px" }}>Item Name</th>
+                          <th style={{ padding: "8px 12px" }}>SKU</th>
+                          <th style={{ padding: "8px 12px" }}>Category</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Current Stock</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Reorder Level</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Suggested Order</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Est. Cost</th>
+                          <th style={{ padding: "8px 12px" }}>Assigned Supplier</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...(reportData.critical_items_list || []), ...(reportData.low_stock_items_list || [])].map((item: any, idx: number) => {
+                          const isCritical = item.quantity_in_stock <= 0;
+                          return (
+                            <tr key={idx} style={{ borderTop: `1px solid ${c.border}` }}>
+                              <td style={{ padding: "9px 12px" }}>
+                                <span
+                                  style={{
+                                    fontSize: 11.5,
+                                    fontWeight: 600,
+                                    color: isCritical ? "#DC2626" : "#EA580C",
+                                    background: isCritical ? "#FEE2E2" : "#FFEDD5",
+                                    padding: "2px 8px",
+                                    borderRadius: 5,
+                                  }}
+                                >
+                                  {isCritical ? "CRITICAL (0)" : "LOW STOCK"}
+                                </span>
+                              </td>
+                              <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>{item.item_name}</td>
+                              <td style={{ padding: "9px 12px", fontFamily: "monospace", color: c.textMuted }}>{item.sku}</td>
+                              <td style={{ padding: "9px 12px", color: c.textMuted }}>{item.category_name}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, color: isCritical ? "#DC2626" : c.text }}>
+                                {item.quantity_in_stock} {item.unit}
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>{item.reorder_level}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.accent }}>
+                                +{item.reorder_quantity} {item.unit}
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>
+                                ${Number(item.estimated_restock_cost).toFixed(2)}
+                              </td>
+                              <td style={{ padding: "9px 12px", color: c.textMuted }}>{item.supplier_name}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {/* 3. CATEGORY VALUATION & MARGINS REPORT VIEW                   */}
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {activeTab === "CATEGORY_WISE" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Active Categories</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      {reportData.total_categories}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>{reportData.total_catalog_items} Active Catalog Items</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Inventory Cost</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      ${Number(reportData.total_inventory_cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Total capital locked in inventory</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Retail Value</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      ${Number(reportData.total_inventory_retail || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#2E7D32", marginTop: 4 }}>Expected sales realization</div>
+                  </div>
+                </div>
+
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, fontWeight: 700, fontSize: 13.5, color: c.text }}>
+                    Category Margin & Capital Breakdown
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Category Name</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Items Count</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Stock Units</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Cost Valuation</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Retail Valuation</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Gross Margin (%)</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Share of Stock</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(reportData.categories || []).map((cat: any, idx: number) => (
+                          <tr key={idx} style={{ borderTop: `1px solid ${c.border}` }}>
+                            <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>{cat.category_name}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>{cat.item_count}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600 }}>{Number(cat.total_units).toLocaleString()}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>${Number(cat.cost_value).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>${Number(cat.stock_value).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: cat.margin_percentage >= 30 ? "#2E7D32" : c.text }}>
+                              {cat.margin_percentage}%
+                            </td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>{cat.space_used_percentage}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {/* 4. TRANSACTION AUDIT LEDGER REPORT VIEW                       */}
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {activeTab === "TRANSACTION" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Transactions</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      {reportData.total_transactions}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>In Selected Window</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Inflow Units</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#2E7D32", marginTop: 4 }}>
+                      +{Number(reportData.total_units_inflow || 0).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Purchases & returns received</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Total Outflow Units</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#DC2626", marginTop: 4 }}>
+                      -{Number(reportData.total_units_outflow || 0).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Sales, damages & expirations</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Net Sales Revenue</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.accent, marginTop: 4 }}>
+                      ${Number(reportData.total_sales_revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>From customer sales</div>
+                  </div>
+                </div>
+
+                {/* Ledger Breakdown by Type */}
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, fontWeight: 700, fontSize: 13.5, color: c.text }}>
+                    Transaction Volume by Classification
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Classification Type</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Record Count</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Units Moved</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Gross Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(reportData.type_breakdown || []).map((t: any, idx: number) => (
+                          <tr key={idx} style={{ borderTop: `1px solid ${c.border}` }}>
+                            <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>{t.transaction_type}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>{t.count}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600 }}>{Number(t.total_quantity).toLocaleString()}</td>
+                            <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>${Number(t.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Detailed Chronological Ledger */}
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: c.text }}>Itemized Transaction Ledger Rows</span>
+                    <input
+                      value={tableSearch}
+                      onChange={(e) => {
+                        setTableSearch(e.target.value);
+                        setPage(1);
+                      }}
+                      placeholder="Filter ledger rows..."
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: 6,
+                        border: `1px solid ${c.border}`,
+                        background: c.inputBg,
+                        color: c.text,
+                        fontSize: 12,
+                        maxWidth: 220,
+                      }}
+                    />
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Date & Time</th>
+                          <th style={{ padding: "8px 12px" }}>Item & SKU</th>
+                          <th style={{ padding: "8px 12px" }}>Type</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Qty</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Unit Price</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Amount</th>
+                          <th style={{ padding: "8px 12px" }}>Operator</th>
+                          <th style={{ padding: "8px 12px" }}>Reason / Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const allRows = (reportData.transactions || []).filter((r: any) => {
+                            if (!tableSearch) return true;
+                            const q = tableSearch.toLowerCase();
+                            return (
+                              r.item_name.toLowerCase().includes(q) ||
+                              r.sku.toLowerCase().includes(q) ||
+                              r.operator_name.toLowerCase().includes(q) ||
+                              r.transaction_type.toLowerCase().includes(q)
+                            );
+                          });
+
+                          const start = (page - 1) * PAGE_SIZE;
+                          const paginated = allRows.slice(start, start + PAGE_SIZE);
+
+                          if (paginated.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={8} style={{ padding: 24, textAlign: "center", color: c.textFaint }}>
+                                  No transaction records match the filter.
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return paginated.map((r: any) => (
+                            <tr key={r.transaction_id} style={{ borderTop: `1px solid ${c.border}` }}>
+                              <td style={{ padding: "9px 12px", color: c.textFaint, fontSize: 11.5 }}>
+                                {new Date(r.transaction_date).toLocaleString()}
+                              </td>
+                              <td style={{ padding: "9px 12px" }}>
+                                <div style={{ fontWeight: 600, color: c.text }}>{r.item_name}</div>
+                                <div style={{ fontSize: 11, color: c.textMuted, fontFamily: "monospace" }}>{r.sku}</div>
+                              </td>
+                              <td style={{ padding: "9px 12px", color: c.textMuted }}>{r.transaction_type}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700 }}>{r.quantity}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>${Number(r.unit_price).toFixed(2)}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>${Number(r.total_amount).toFixed(2)}</td>
+                              <td style={{ padding: "9px 12px" }}>
+                                <span style={{ color: "#2563EB", fontWeight: 600 }}>@{r.operator_name}</span>
+                              </td>
+                              <td style={{ padding: "9px 12px", color: c.textMuted, fontSize: 11.5 }}>
+                                {r.reason || r.note || "—"}
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {/* 5. STOCK MOVEMENT & VELOCITY (ABC) REPORT VIEW                */}
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {activeTab === "STOCK_MOVEMENT" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Tracked Items</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      {reportData.total_tracked_items}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Active SKU movement tracked</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Fast-Moving (Class A)</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#2E7D32", marginTop: 4 }}>
+                      {reportData.fast_moving_count}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>High inventory velocity & sales</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Steady-Moving (Class B)</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#2563EB", marginTop: 4 }}>
+                      {reportData.steady_moving_count}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Consistent baseline consumption</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Slow / Non-Moving (Class C)</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#EA580C", marginTop: 4 }}>
+                      {(reportData.slow_moving_count || 0) + (reportData.non_moving_count || 0)}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Risk of dead stock accumulation</div>
+                  </div>
+                </div>
+
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: c.text }}>Inventory Velocity & Turnover Ledger</span>
+                    <input
+                      value={tableSearch}
+                      onChange={(e) => {
+                        setTableSearch(e.target.value);
+                        setPage(1);
+                      }}
+                      placeholder="Filter items..."
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: 6,
+                        border: `1px solid ${c.border}`,
+                        background: c.inputBg,
+                        color: c.text,
+                        fontSize: 12,
+                        maxWidth: 220,
+                      }}
+                    />
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Item Name & SKU</th>
+                          <th style={{ padding: "8px 12px" }}>Category</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Opening Stock</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Inflow (+)</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Outflow (-)</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Closing Stock</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Net Change</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Turnover Rate</th>
+                          <th style={{ padding: "8px 12px" }}>Velocity Classification</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const allRows = (reportData.items || []).filter((r: any) => {
+                            if (!tableSearch) return true;
+                            const q = tableSearch.toLowerCase();
+                            return (
+                              r.item_name.toLowerCase().includes(q) ||
+                              r.sku.toLowerCase().includes(q) ||
+                              r.category_name.toLowerCase().includes(q)
+                            );
+                          });
+
+                          const start = (page - 1) * PAGE_SIZE;
+                          const paginated = allRows.slice(start, start + PAGE_SIZE);
+
+                          return paginated.map((item: any) => {
+                            const isFast = item.velocity_tier.startsWith("Fast");
+                            const isSteady = item.velocity_tier.startsWith("Steady");
+                            return (
+                              <tr key={item.item_id} style={{ borderTop: `1px solid ${c.border}` }}>
+                                <td style={{ padding: "9px 12px" }}>
+                                  <div style={{ fontWeight: 600, color: c.text }}>{item.item_name}</div>
+                                  <div style={{ fontSize: 11, color: c.textMuted, fontFamily: "monospace" }}>{item.sku}</div>
+                                </td>
+                                <td style={{ padding: "9px 12px", color: c.textMuted }}>{item.category_name}</td>
+                                <td style={{ padding: "9px 12px", textAlign: "right", color: c.textMuted }}>{item.opening_stock} {item.unit}</td>
+                                <td style={{ padding: "9px 12px", textAlign: "right", color: "#2E7D32", fontWeight: 600 }}>+{item.total_inflow}</td>
+                                <td style={{ padding: "9px 12px", textAlign: "right", color: "#DC2626", fontWeight: 600 }}>-{item.total_outflow}</td>
+                                <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700 }}>{item.closing_stock} {item.unit}</td>
+                                <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: item.net_change >= 0 ? "#2E7D32" : "#DC2626" }}>
+                                  {item.net_change >= 0 ? `+${item.net_change}` : item.net_change}
+                                </td>
+                                <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600 }}>{item.turnover_rate}%</td>
+                                <td style={{ padding: "9px 12px" }}>
+                                  <span
+                                    style={{
+                                      fontSize: 11.5,
+                                      fontWeight: 600,
+                                      color: isFast ? "#2E7D32" : isSteady ? "#2563EB" : "#B45309",
+                                      background: isFast ? "#DCFCE7" : isSteady ? "#DBEAFE" : "#FEF3C7",
+                                      padding: "2px 8px",
+                                      borderRadius: 5,
+                                    }}
+                                  >
+                                    {item.velocity_tier}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {/* 6. SUPPLIER PERFORMANCE & SPEND REPORT VIEW                   */}
+            {/* ══════════════════════════════════════════════════════════════ */}
+            {activeTab === "SUPPLIER" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Active Suppliers</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      {reportData.active_suppliers}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Out of {reportData.total_suppliers} total suppliers</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Period Purchase Spend</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+                      ${Number(reportData.total_purchase_spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Total procurement disbursements</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Completed Purchase Orders</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#2E7D32", marginTop: 4 }}>
+                      {reportData.completed_orders_count}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Fully fulfilled and received</div>
+                  </div>
+
+                  <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: "14px 16px" }}>
+                    <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Pending Purchase Orders</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: "#EA580C", marginTop: 4 }}>
+                      {reportData.pending_orders_count}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 4 }}>Awaiting fulfillment / delivery</div>
+                  </div>
+                </div>
+
+                <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+                  <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: c.text }}>Supplier Fulfillment & Spend Scorecard</span>
+                    <input
+                      value={tableSearch}
+                      onChange={(e) => {
+                        setTableSearch(e.target.value);
+                        setPage(1);
+                      }}
+                      placeholder="Filter suppliers..."
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: 6,
+                        border: `1px solid ${c.border}`,
+                        background: c.inputBg,
+                        color: c.text,
+                        fontSize: 12,
+                        maxWidth: 220,
+                      }}
+                    />
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "8px 12px" }}>Supplier Name</th>
+                          <th style={{ padding: "8px 12px" }}>Contact Person</th>
+                          <th style={{ padding: "8px 12px" }}>Phone</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Sourced Items</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Total Spend</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Completed POs</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Pending POs</th>
+                          <th style={{ padding: "8px 12px", textAlign: "right" }}>Fulfillment Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const allRows = (reportData.suppliers || []).filter((s: any) => {
+                            if (!tableSearch) return true;
+                            const q = tableSearch.toLowerCase();
+                            return (
+                              s.supplier_name.toLowerCase().includes(q) ||
+                              s.contact_person.toLowerCase().includes(q) ||
+                              s.phone.toLowerCase().includes(q)
+                            );
+                          });
+
+                          const start = (page - 1) * PAGE_SIZE;
+                          const paginated = allRows.slice(start, start + PAGE_SIZE);
+
+                          return paginated.map((sup: any) => (
+                            <tr key={sup.supplier_id} style={{ borderTop: `1px solid ${c.border}` }}>
+                              <td style={{ padding: "9px 12px", fontWeight: 600, color: c.text }}>
+                                {sup.supplier_name}
+                              </td>
+                              <td style={{ padding: "9px 12px", color: c.textMuted }}>{sup.contact_person}</td>
+                              <td style={{ padding: "9px 12px", color: c.textMuted, fontFamily: "monospace" }}>{sup.phone}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600 }}>{sup.total_items_supplied}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 600, color: c.text }}>
+                                ${Number(sup.total_purchase_spend).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", color: "#2E7D32", fontWeight: 600 }}>{sup.completed_pos}</td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", color: sup.pending_pos > 0 ? "#EA580C" : c.textMuted, fontWeight: 500 }}>
+                                {sup.pending_pos}
+                              </td>
+                              <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, color: sup.fulfillment_rate >= 80 ? "#2E7D32" : c.text }}>
+                                {sup.fulfillment_rate}%
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
+      </div>
     </div>
   );
 }

@@ -3,439 +3,222 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from decimal import Decimal
 
 from app.database import get_async_session
-
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.routes.dependencies import RoleChecker
-
-from app.models import UserRole, POType, User
-
+from app.models import UserRole, POStatus, User
 from app.crud import purchaseorder as crud_po
 from app.crud import supplier as crud_supplier
 from app.crud import item as crud_item
-
+from app.crud import item_supplier as crud_item_supplier
+from app.crud import auditlog as crud_auditlog
 from app.services.report_generator import generate_po_pdf_document
-
 from app.schemas.purchaseorder import (
     PurchaseOrderCreate,
     PurchaseOrderResponse,
     PurchaseOrderItemResponse,
-    PurchaseOrderItemCreate,
-    PurchaseOrderItemUpdate,
+    PurchaseOrderStatusUpdate,
 )
 
 router = APIRouter(prefix="/purchas-orders", tags=["purchaseorders"])
 
 
-# ----------------------- Endpoint for get all reports ----------------------- #
+# ----------------------- Get all Purchase Orders ---------------------------- #
 @router.get("/", response_model=list[PurchaseOrderResponse])
 async def get_all_purchase_orders(
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER, UserRole.AUDITOR])
     ),
 ):
     p_orders = await crud_po.get_all_purchase_orders(db)
-    return [
-        PurchaseOrderResponse(
-            po_id=po.po_id,
-            supplier_id=po.supplier_id,
-            supplier_name=po.supplier.supplier_name,
-            po_type=po.po_type,
-            created_at=po.created_at,
-            created_by=po.user.full_name if po.user else None,
-        )
-        for po in p_orders
-    ]
+    return [PurchaseOrderResponse.model_validate(po) for po in p_orders]
 
 
-# -------------------- Endpoint for auto generated drafts -------------------- #
-@router.post("/auto-generated", status_code=201)
-async def auto_generated_drafts(
+# ----------------------- Check Active PO for Supplier ----------------------- #
+@router.get("/active-check/{supplier_id}")
+async def check_active_po_for_supplier(
+    supplier_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER])
     ),
 ):
-    # 1. Fetch all suppliers that currently have active alerts
-    suppliers_with_alerts = await crud_po.get_suppliers_with_alerts(db)
-    if not suppliers_with_alerts:
-        return {"message": "No active stock alerts found. No drafts created."}
-
-    alerted_supplier_ids = {
-        s.supplier_id for s in suppliers_with_alerts
-    }  # set of supplier IDs with active alerts
-
-    # 2. Query for suppliers that already have an open DRAFT purchase order
-    existing_drafts = await crud_po.get_suppliers_with_draft_po(
-        db, alerted_supplier_ids
-    )
-
-    # 3. Use Set Difference to find suppliers needing a new draft PO
-    suppliers_to_create = alerted_supplier_ids - existing_drafts
-
-    if not suppliers_to_create:
+    active_po = await crud_po.get_active_po_for_supplier(db, supplier_id)
+    if active_po:
         return {
-            "message": "All alerted suppliers already have active drafts pending review."
+            "has_active_po": True,
+            "po_id": active_po.po_id,
+            "status": active_po.status.value,
         }
-
-    # 4. Use your Pydantic Schema to instantiate your records cleanly
-    new_pos_to_commit = []
-    for supplier_id in suppliers_to_create:
-        # Utilizing your PurchaseOrderCreate Pydantic schema structure
-        po_data = PurchaseOrderCreate(supplier_id=supplier_id, po_type=POType.DRAFT)
-        new_po = await crud_po.create_purchase_order(db, po_data, current_user.user_id)
-        new_pos_to_commit.append(new_po)
-
-    # 5. Fast Bulk Save execution
-    db.add_all(new_pos_to_commit)
-    await db.commit()
-
-    return {
-        "message": f"Successfully auto-generated {len(new_pos_to_commit)} new draft purchase orders.",
-        "created_for_supplier_ids": list(suppliers_to_create),
-    }
+    return {"has_active_po": False}
 
 
-# -------------------- Endpoint for manual draft creation -------------------- #
-@router.post("/manual", status_code=201)
-async def create_manual_draft_po(
+# ----------------------- Get single Purchase Order by ID -------------------- #
+@router.get("/{po_id}", response_model=PurchaseOrderResponse)
+async def get_single_purchase_order(
+    po_id: uuid.UUID,
+    db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER, UserRole.AUDITOR])
+    ),
+):
+    po = await crud_po.get_purchase_order_by_id(db, po_id)
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    return PurchaseOrderResponse.model_validate(po)
+
+
+# ----------------------- Create new Purchase Order -------------------------- #
+@router.post("/", response_model=PurchaseOrderResponse, status_code=201)
+async def create_purchase_order(
     payload: PurchaseOrderCreate,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER])
     ),
 ):
-    # 1. Ensure the supplier is valid and active
-    result = await crud_supplier.get_supplier_by_supplier_id(db, payload.supplier_id)
-    if not result:
+    # 1. Verify supplier exists and is active
+    supplier = await crud_supplier.get_supplier_by_supplier_id(db, payload.supplier_id)
+    if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found.")
-    if not result.is_active:
+    if not supplier.is_active:
+        raise HTTPException(
+            status_code=400, detail="Cannot create purchase order for an inactive supplier."
+        )
+
+    # 2. Rule: Only ONE active PO per supplier
+    active_po = await crud_po.get_active_po_for_supplier(db, payload.supplier_id)
+    if active_po:
         raise HTTPException(
             status_code=400,
-            detail="Cannot create a purchase order for an inactive supplier.",
+            detail=f"An active purchase order ({active_po.status.value}) already exists for this supplier. Complete or cancel it first.",
         )
 
-    # 2. Check if a draft already exists to prevent redundant open orders
-    existing_draft = await crud_po.get_existing_draft_po(db, payload.supplier_id)
-    if existing_draft:
-        return {
-            "message": "An open draft already exists for this supplier.",
-            "po_id": existing_draft.po_id,
-            "is_new": False,
-        }
-
-    # 3. Create the new blank draft PO row
-    payload.po_type = POType.DRAFT
-    new_po = await crud_po.create_purchase_order(db, payload, current_user.user_id)
-
-    db.add(new_po)
-    await db.commit()
-    await db.refresh(new_po)
-
-    return {
-        "message": "Manual draft purchase order created successfully.",
-        "po_id": new_po.po_id,
-        "is_new": True,
-    }
-
-
-# ------------------ Open/Synchronize a draft Purchase Order ----------------- #
-@router.get("/{po_id}/items", response_model=list[PurchaseOrderItemResponse])
-async def get_purchase_order_items(
-    po_id: uuid.UUID,
-    db: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
+    # 3. Verify items list is provided
+    if not payload.items:
+        raise HTTPException(
+            status_code=400, detail="Purchase order must contain at least one item."
         )
-    ),
-):
-    # 1. Fetch PO and pre-load existing items with their core product attributes
-    po = await crud_po.get_purchase_order_with_poi(db, po_id)
 
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
-
-    # Track items that are already in this purchase order
-    existing_poi_item_ids = {poi.item_id for poi in po.purchaseorderitems}
-
-    # 2. Get the up-to-the-minute active stock alerts for this supplier
-    current_low_stock_items = await crud_item.get_items_with_active_stock_alerts(
-        db, po.supplier_id
-    )
-    if not current_low_stock_items:
-        current_low_stock_items = []
-
-    # Create a quick look-up set of item IDs that currently need a reorder
-    active_alert_item_ids = {item.item_id for item in current_low_stock_items}
-
-    # 3. Identify alert items that have NOT yet been added to this draft
-    missing_poicreate_payload = []
-    for item in current_low_stock_items:
-        if item.item_id not in existing_poi_item_ids:
-            missing_poicreate_payload.append(
-                PurchaseOrderItemCreate(
-                    item_id=item.item_id,
-                    quantity=item.reorder_quantity,
-                    unit_price=item.cost_price,
-                )
+    # 4. Enforce fixed agreed prices from ItemSupplier
+    item_prices_map: dict[uuid.UUID, Decimal] = {}
+    for item_input in payload.items:
+        rel = await crud_item_supplier.get_item_supplier(
+            db, item_input.item_id, payload.supplier_id
+        )
+        if not rel:
+            item = await crud_item.get_item_by_item_id(db, item_input.item_id)
+            item_name = item.item_name if item else "Unknown Item"
+            raise HTTPException(
+                status_code=400,
+                detail=f'Item "{item_name}" is not supplied by {supplier.supplier_name}. Please link it with an agreed price first.',
             )
+        item_prices_map[item_input.item_id] = rel.agreed_price
 
-    # 4. If new alerts are found that aren't in the draft yet, save them in bulk
-    if missing_poicreate_payload:
-        await crud_po.create_purchase_order_items_bulk(
-            db, missing_poicreate_payload, po_id
-        )
-        # Re-fetch the PO so SQLAlchemy catches the updated list with loaded items
-        po = await crud_po.get_purchase_order_with_poi(db, po_id)
-        if not po:
-            raise HTTPException(status_code=404, detail="Purchase Order not found.")
-
-    # 5. Map the fully synchronized rows cleanly into your flat response schema
-    return [
-        PurchaseOrderItemResponse(
-            item_id=poi.item_id,
-            quantity=poi.quantity,
-            unit_price=poi.unit_price,
-            poi_id=poi.poi_id,
-            po_id=poi.po_id,
-            item_name=poi.item.item_name,
-            # active stock alerts, it means it has been restocked elsewhere!
-            is_stale_alert=poi.item_id not in active_alert_item_ids,
-        )
-        for poi in po.purchaseorderitems
-    ]
-
-
-# ---------------------- Add a single item/row in draft ---------------------- #
-@router.post(
-    "/{po_id}/items", response_model=PurchaseOrderItemResponse, status_code=201
-)
-async def add_single_item_to_po(
-    po_id: uuid.UUID,
-    payload: PurchaseOrderItemCreate,
-    db: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
-    ),
-):
-    # 1. Fetch the target Purchase Order to verify its type and supplier
-    po = await crud_po.get_purchase_order_by_id(db, po_id)
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
-
-    if po.po_type != POType.DRAFT:
-        raise HTTPException(
-            status_code=400, detail="Cannot add items to a finalized purchase order."
-        )
-
-    # 2. Crucial Validation: Verify the item exists and belongs to this PO's supplier
-    item = await crud_item.get_item_by_item_id(db, payload.item_id)
-
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found.")
-    if not item.is_active:
-        raise HTTPException(
-            status_code=400, detail="Cannot add an inactive item to the purchase order."
-        )
-    if item.supplier_id != po.supplier_id:
-        raise HTTPException(
-            status_code=400,
-            detail="This item does not belong to the supplier assigned to this purchase order.",
-        )
-
-    # 3. Check if the item is already in the draft PO to prevent redundancy
-    existing_pois = await crud_po.get_purchase_order_items_by_po_id(db, po_id)
-
-    if existing_pois is None:
-        existing_pois = []
-
-    if any(poi.item_id == payload.item_id for poi in existing_pois):
-        raise HTTPException(
-            status_code=400,
-            detail="This item is already included in the purchase order.",
-        )
-
-    # 4. Save the single row to the database
-    new_pois = await crud_po.create_purchase_order_items_bulk(db, [payload], po_id)
-    new_poi = new_pois[0]
-
-    # 5. Return the record mapped to your flat PurchaseOrderItemResponse schema
-    return PurchaseOrderItemResponse(
-        item_id=new_poi.item_id,
-        quantity=new_poi.quantity,
-        unit_price=new_poi.unit_price,
-        poi_id=new_poi.poi_id,
-        po_id=new_poi.po_id,
-        item_name=item.item_name,
+    # 5. Create PO and line items
+    new_po = await crud_po.create_purchase_order(
+        db, payload, current_user.user_id, item_prices_map
     )
 
+    return PurchaseOrderResponse.model_validate(new_po)
 
-# ----------------- Bulk Update Items in a Draft PO ---------------- #
-@router.patch("/{po_id}/items/bulk-update", status_code=200)
-async def bulk_patch_po_items(
+
+# ----------------------- Update Purchase Order Status ----------------------- #
+@router.patch("/{po_id}/status", response_model=PurchaseOrderResponse)
+async def update_po_status(
     po_id: uuid.UUID,
-    payload: list[PurchaseOrderItemUpdate],
+    payload: PurchaseOrderStatusUpdate,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER])
     ),
 ):
-    # 1. Verify the targeted purchase order exists
     po = await crud_po.get_purchase_order_by_id(db, po_id)
     if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+        raise HTTPException(status_code=404, detail="Purchase order not found")
 
-    # 2. Enforce editing rules: Finalized orders cannot be mutated
-    if po.po_type != POType.DRAFT:
+    old_status = po.status
+    new_status = payload.status
+
+    # Enforce state machine rules
+    if old_status in [POStatus.COMPLETED, POStatus.CANCELLED]:
         raise HTTPException(
             status_code=400,
-            detail="Cannot update items on a finalized or generated purchase order.",
+            detail=f"Purchase order is {old_status.value} and cannot be modified.",
         )
 
-    # 3. Execute the high-performance bulk update
-    updated_count = await crud_po.update_purchase_order_items_bulk(db, po_id, payload)
-
-    # 4. If the payload items don't map to actual database rows for this PO, alert the client
-    if updated_count == 0 and payload:
+    if new_status == POStatus.PENDING_APPROVAL and old_status != POStatus.DRAFT:
         raise HTTPException(
-            status_code=400,
-            detail="No matching items were found or updated for this purchase order.",
+            status_code=400, detail="Only draft purchase orders can be sent for approval."
         )
 
-    return {
-        "message": "Purchase order items updated successfully.",
-        "updated_rows_count": updated_count,
-    }
-
-
-# ---------------------------- Delete a single poi --------------------------- #
-@router.delete("/items/{poi_id}", status_code=200)
-async def delete_single_po_item(
-    poi_id: uuid.UUID,
-    db: AsyncSession = Depends(get_async_session),
-    current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
+    if new_status == POStatus.APPROVED and old_status not in [
+        POStatus.DRAFT,
+        POStatus.PENDING_APPROVAL,
+    ]:
+        raise HTTPException(
+            status_code=400, detail="Cannot approve purchase order in its current status."
         )
-    ),
-):
-    result = await crud_po.get_purchase_order_item_by_poi_id(db, poi_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Purchase Order Item not found.")
-    await crud_po.delete_purchase_order_item(db, poi_id)
-    return {"message": "Line item removed successfully."}
+
+    updated_po = await crud_po.update_purchase_order_status(
+        db, po, new_status, payload.notes
+    )
+
+    return PurchaseOrderResponse.model_validate(updated_po)
 
 
-# ------------------- Endpoint for delete a purchase order ------------------- #
-@router.delete("/{po_id}", status_code=200)
-async def delete_entire_purchase_order(
+# ----------------------- Delete Purchase Order ------------------------------ #
+@router.delete("/{po_id}", status_code=204)
+async def delete_purchase_order(
     po_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER])
     ),
 ):
-    result = await crud_po.get_purchase_order_by_id(db, po_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+    po = await crud_po.get_purchase_order_by_id(db, po_id)
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+
+    if po.status not in [POStatus.DRAFT, POStatus.CANCELLED]:
+        raise HTTPException(
+            status_code=400,
+            detail="Only Draft or Cancelled purchase orders can be deleted.",
+        )
+
     await crud_po.delete_purchase_order(db, po_id)
-    return {"message": "Purchase order and all associated items deleted successfully."}
 
 
-# ------------------------------- Generate PDF ------------------------------- #
-@router.post("/{po_id}/generate", status_code=200)
-async def generate_purchase_order(
+# ----------------------- Generate Purchase Order PDF ------------------------ #
+@router.get("/{po_id}/pdf")
+@router.post("/{po_id}/generate")
+async def generate_purchase_order_pdf(
     po_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(
-        RoleChecker(
-            [
-                UserRole.ADMIN,
-                UserRole.INVENTORY_MANAGER,
-            ]
-        )
+        RoleChecker([UserRole.ADMIN, UserRole.INVENTORY_MANAGER, UserRole.AUDITOR])
     ),
 ):
-    # 1. Fetch the PO with nested items and core names using your existing CRUD function
-    po = await crud_po.get_purchase_order_with_poi(db, po_id)
-
+    po = await crud_po.get_purchase_order_by_id(db, po_id)
     if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
-
-    print(
-        f"--- DEBUG: My database found {len(po.purchaseorderitems)} items for this PO ---"
-    )
-
-    # if po.po_type != POType.DRAFT:
-    #     raise HTTPException(
-    #         status_code=400,
-    #         detail="This purchase order has already been finalized."
-    #     )
+        raise HTTPException(status_code=404, detail="Purchase order not found")
 
     if not po.purchaseorderitems:
         raise HTTPException(
-            status_code=400, detail="Cannot finalize an empty purchase order."
+            status_code=400, detail="Cannot generate PDF for an empty purchase order."
         )
 
-    # 2. Lock the status by moving it to GENERATED in memory
-    po.po_type = POType.GENERATED
-    # Commit the status change safely to the database
-    await db.commit()
-
-    # 3. Instantiate an in-memory byte buffer stream
     pdf_buffer = io.BytesIO()
-
-    # 4. Write PDF data straight into the RAM stream
     generate_po_pdf_document(output_target=pdf_buffer, po_items=po.purchaseorderitems)
-
-    # 5. Move stream index back to position zero so FastAPI reads from the beginning
     pdf_buffer.seek(0)
 
-    # 6. Stream file directly back to the user's browser download pipeline
     return StreamingResponse(
         pdf_buffer,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename=Purchase_Order_{po_id}.pdf"
+            "Content-Disposition": f"attachment; filename=Purchase_Order_{str(po_id)[:8]}.pdf"
         },
     )

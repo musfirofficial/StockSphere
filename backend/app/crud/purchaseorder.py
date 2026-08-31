@@ -1,197 +1,128 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload, joinedload
-from app.models import (
-    Supplier,
-    StockAlert,
-    AlertStatus,
-    PurchaseOrder,
-    PurchaseOrderItem,
-    POType,
-)
-from app.schemas.purchaseorder import (
-    PurchaseOrderCreate,
-    PurchaseOrderItemCreate,
-    PurchaseOrderItemUpdate,
-)
 from typing import Sequence
 import uuid
+from decimal import Decimal
 
-# ---------------------------------------------------------------------------- #
-#                                Purchase Order                                #
-# ---------------------------------------------------------------------------- #
+from app.models import (
+    Supplier,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    POStatus,
+    Item,
+    ItemSupplier,
+)
+from app.schemas.purchaseorder import PurchaseOrderCreate, POItemInput
 
 
-# ---------------------- Create new purchase order crud ---------------------- #
+ACTIVE_PO_STATUSES = [
+    POStatus.DRAFT,
+    POStatus.PENDING_APPROVAL,
+    POStatus.APPROVED,
+    POStatus.PARTIALLY_RECEIVED,
+]
+
+
+# --------------------- Get active PO for a supplier ------------------------- #
+async def get_active_po_for_supplier(
+    db: AsyncSession, supplier_id: uuid.UUID, exclude_po_id: uuid.UUID | None = None
+) -> PurchaseOrder | None:
+    stmt = select(PurchaseOrder).where(
+        PurchaseOrder.supplier_id == supplier_id,
+        PurchaseOrder.status.in_(ACTIVE_PO_STATUSES),
+    )
+    if exclude_po_id:
+        stmt = stmt.where(PurchaseOrder.po_id != exclude_po_id)
+
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+# ----------------------- Create new purchase order -------------------------- #
 async def create_purchase_order(
-    db: AsyncSession, po_in: PurchaseOrderCreate, created_by: uuid.UUID
+    db: AsyncSession,
+    po_in: PurchaseOrderCreate,
+    created_by: uuid.UUID | None,
+    item_prices: dict[uuid.UUID, Decimal],
 ) -> PurchaseOrder:
-    new_po = PurchaseOrder(**po_in.model_dump(), created_by=created_by)
+    new_po = PurchaseOrder(
+        supplier_id=po_in.supplier_id,
+        created_by=created_by,
+        status=POStatus.DRAFT,
+        po_type=POStatus.DRAFT,
+        notes=po_in.notes,
+    )
+    db.add(new_po)
+    await db.flush()
 
-    return new_po
+    for item_input in po_in.items:
+        agreed_price = item_prices.get(item_input.item_id, Decimal("0.00"))
+        poi = PurchaseOrderItem(
+            po_id=new_po.po_id,
+            item_id=item_input.item_id,
+            quantity=item_input.quantity,
+            quantity_received=0,
+            unit_price=agreed_price,
+        )
+        db.add(poi)
+
+    await db.commit()
+    await db.refresh(new_po)
+
+    full_po = await get_purchase_order_by_id(db, new_po.po_id)
+    return full_po or new_po
 
 
-# ----------------------- CRUD for get purchase order by ID ---------------------- #
+# --------------------- Get purchase order by ID ----------------------------- #
 async def get_purchase_order_by_id(
     db: AsyncSession, order_id: uuid.UUID
 ) -> PurchaseOrder | None:
     result = await db.execute(
-        select(PurchaseOrder).filter(PurchaseOrder.po_id == order_id)
+        select(PurchaseOrder)
+        .options(
+            joinedload(PurchaseOrder.supplier),
+            joinedload(PurchaseOrder.user),
+            selectinload(PurchaseOrder.purchaseorderitems).joinedload(PurchaseOrderItem.item),
+        )
+        .where(PurchaseOrder.po_id == order_id)
     )
-    return result.scalar_one_or_none()
+    return result.unique().scalar_one_or_none()
 
 
-# ----------------------- CRUD for get all purchase orders ---------------------- #
+# --------------------- Get all purchase orders ------------------------------ #
 async def get_all_purchase_orders(db: AsyncSession) -> Sequence[PurchaseOrder]:
     result = await db.execute(
         select(PurchaseOrder)
         .options(
-            selectinload(PurchaseOrder.supplier),
-            selectinload(PurchaseOrder.user),
+            joinedload(PurchaseOrder.supplier),
+            joinedload(PurchaseOrder.user),
+            selectinload(PurchaseOrder.purchaseorderitems).joinedload(PurchaseOrderItem.item),
         )
         .order_by(PurchaseOrder.created_at.desc())
     )
-    return result.scalars().all()
+    return result.unique().scalars().all()
 
 
-# ------------------------ CRUD for delete existing po ----------------------- #
+# --------------------- Update PO status ------------------------------------- #
+async def update_purchase_order_status(
+    db: AsyncSession,
+    po: PurchaseOrder,
+    new_status: POStatus,
+    notes: str | None = None,
+) -> PurchaseOrder:
+    po.status = new_status
+    po.po_type = new_status
+    if notes is not None:
+        po.notes = notes
+    await db.commit()
+    await db.refresh(po)
+    full = await get_purchase_order_by_id(db, po.po_id)
+    return full or po
+
+
+# --------------------- Delete purchase order -------------------------------- #
 async def delete_purchase_order(db: AsyncSession, order_id: uuid.UUID):
-    await db.execute(delete(PurchaseOrder).filter(PurchaseOrder.po_id == order_id))
+    await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.po_id == order_id))
+    await db.execute(delete(PurchaseOrder).where(PurchaseOrder.po_id == order_id))
     await db.commit()
-
-
-# ---------------------------------------------------------------------------- #
-#                              Purchase Order Item                             #
-# ---------------------------------------------------------------------------- #
-
-
-# ------------------------ Create purchase order items ----------------------- #
-async def create_purchase_order_items_bulk(
-    db: AsyncSession, items_in: list[PurchaseOrderItemCreate], po_id: uuid.UUID
-) -> list[PurchaseOrderItem]:
-    # 1. Map Pydantic models to SQLALchemy instances entirely in memory
-    new_items = []
-    for item in items_in:
-        new_items.append(PurchaseOrderItem(**item.model_dump(), po_id=po_id))
-    # 2. Add all items to the session context at once
-    db.add_all(new_items)
-    # 3. Commit exactly ONCE for the entire batch
-    await db.commit()
-    return new_items
-
-
-# --------------------- Update purchase order items bulk --------------------- #
-async def update_purchase_order_items_bulk(
-    db: AsyncSession, po_id: uuid.UUID, updates: list[PurchaseOrderItemUpdate]
-) -> int:
-
-    # Returns the count of successfully updated rows.
-
-    if not updates:
-        return 0
-
-    # 1. Map input payload into a dictionary for quick O(1) memory lookup
-    updates_map = {u.poi_id: u for u in updates}
-
-    # 2. Fetch all matching rows tied to this specific PO in a single round-trip
-    stmt = select(PurchaseOrderItem).where(
-        PurchaseOrderItem.poi_id.in_(list(updates_map.keys())),
-        PurchaseOrderItem.po_id == po_id,
-    )
-    result = await db.execute(stmt)
-    db_items = result.scalars().all()
-
-    # 3. Apply changes to the tracked ORM instances in memory
-    for db_item in db_items:
-        update_data = updates_map[db_item.poi_id]
-        db_item.quantity = update_data.quantity
-        db_item.unit_price = update_data.unit_price
-
-    # 4. Save all altered records within a single transaction block
-    await db.commit()
-
-    return len(db_items)
-
-
-# ------------------- Delete purchase order items by po_id ------------------- #
-async def delete_purchase_order_item(db: AsyncSession, poi_id: uuid.UUID):
-    await db.execute(
-        delete(PurchaseOrderItem).where(PurchaseOrderItem.poi_id == poi_id)
-    )
-    await db.commit()
-
-
-# --------------------- Get purchase order item by poi id -------------------- #
-async def get_purchase_order_item_by_poi_id(
-    db: AsyncSession, poi_id: uuid.UUID
-) -> PurchaseOrderItem | None:
-    result = await db.execute(
-        select(PurchaseOrderItem).filter(PurchaseOrderItem.poi_id == poi_id)
-    )
-    return result.scalar_one_or_none()
-
-
-# --------------------- Get purchase order items by po_id -------------------- #
-async def get_purchase_order_items_by_po_id(
-    db: AsyncSession, po_id: uuid.UUID
-) -> Sequence[PurchaseOrderItem] | None:
-    result = await db.execute(
-        select(PurchaseOrderItem).filter(PurchaseOrderItem.po_id == po_id)
-    )
-    return result.scalars().all()
-
-
-# ---------------------------------------------------------------------------- #
-#                                   Utilities                                  #
-# ---------------------------------------------------------------------------- #
-
-
-# ------------------------ get suppliers with alerts ----------------------- #
-async def get_suppliers_with_alerts(db: AsyncSession) -> Sequence[Supplier]:
-    results = await db.execute(
-        select(Supplier)
-        .join(Supplier.stockalerts)
-        .where(StockAlert.status != AlertStatus.RESOLVED)
-        .distinct()
-    )
-    return results.scalars().all()
-
-
-# -------------- get suppliers with Draft purchase PurchaseOrder ------------- #
-async def get_suppliers_with_draft_po(db: AsyncSession, alert_set: set):
-    result = await db.execute(
-        select(PurchaseOrder.supplier_id).where(
-            PurchaseOrder.po_type == POType.DRAFT,
-            PurchaseOrder.supplier_id.in_(list(alert_set)),
-        )
-    )
-    return set(result.scalars().all())
-
-
-# ---------------------- get existing draft for supplier --------------------- #
-async def get_existing_draft_po(
-    db: AsyncSession, supplier_id: uuid.UUID
-) -> PurchaseOrder | None:
-    result = await db.execute(
-        select(PurchaseOrder).where(
-            PurchaseOrder.supplier_id == supplier_id,
-            PurchaseOrder.po_type == POType.DRAFT,
-        )
-    )
-    return result.scalar_one_or_none()
-
-
-# ------------------------ get purchase order and poi ------------------------ #
-async def get_purchase_order_with_poi(
-    db: AsyncSession, po_id: uuid.UUID
-) -> PurchaseOrder | None:
-    po_result = await db.execute(
-        select(PurchaseOrder)
-        .where(PurchaseOrder.po_id == po_id)
-        .options(
-            selectinload(PurchaseOrder.purchaseorderitems).selectinload(
-                PurchaseOrderItem.item
-            )
-        )
-    )
-    return po_result.scalar_one_or_none()

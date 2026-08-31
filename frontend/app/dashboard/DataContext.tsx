@@ -15,7 +15,16 @@ export interface RecentTransaction {
   item_name: string;
   user_id: string;
   user_name: string;
-  transaction_type: "STOCK_IN" | "STOCK_OUT";
+  transaction_type:
+    | "STOCK_IN"
+    | "STOCK_OUT"
+    | "PURCHASE"
+    | "SOLD"
+    | "CUSTOMER_RETURN"
+    | "DAMAGED"
+    | "EXPIRED"
+    | "ADJUSTMENT_INCREASE"
+    | "ADJUSTMENT_DECREASE";
   quantity: number;
   previous_quantity: number;
   new_quantity: number;
@@ -91,6 +100,7 @@ export interface Item {
   reorderLevel: number;
   reorderQuantity: number;
   active: boolean;
+  healthStatus?: "HEALTHY" | "LOW_STOCK" | "CRITICAL";
   createdAt: string;
   updatedAt: string;
 }
@@ -367,6 +377,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         reorderLevel: item.reorder_level,
         reorderQuantity: item.reorder_quantity,
         active: item.is_active,
+        healthStatus: item.health_status || (item.quantity_in_stock <= 0 ? "CRITICAL" : item.quantity_in_stock <= item.reorder_level ? "LOW_STOCK" : "HEALTHY"),
         createdAt: item.created_at,
         updatedAt: item.updated_at,
       }));

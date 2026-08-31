@@ -1,15 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, extract, cast, Date, desc
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func, extract, cast, Date, desc, or_, case
+from sqlalchemy.orm import joinedload
 from app.schemas.dashboard import MostSoldItem
 from app.schemas.transaction import TransactionResponse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.models import (
     Item,
-    StockAlert,
-    AlertStatus,
     PurchaseOrder,
-    POType,
+    POStatus,
     Transaction,
     TransactionType,
 )
@@ -19,23 +17,24 @@ import uuid
 
 local_tz = datetime.now().astimezone().tzinfo
 
+SOLD_TYPES = [TransactionType.SOLD, TransactionType.STOCK_OUT]
+
 
 # -------------------------- Get Item in stock data -------------------------- #
 async def get_item_in_stock_quantity(db: AsyncSession) -> int:
     result = await db.execute(
         select(func.coalesce(func.sum(Item.quantity_in_stock), 0)).where(
-            Item.quantity_in_stock > 0
+            Item.quantity_in_stock > 0, Item.is_active == True
         )
     )
     return result.scalar_one()
 
 
 async def get_item_in_stock_value(db: AsyncSession) -> Decimal:
-    # coalesce replaces NULL with 0 if no rows match
     result = await db.execute(
         select(
             func.coalesce(func.sum(Item.quantity_in_stock * Item.cost_price), 0)
-        ).where(Item.quantity_in_stock > 0)
+        ).where(Item.quantity_in_stock > 0, Item.is_active == True)
     )
     return Decimal(str(result.scalar_one()))
 
@@ -43,8 +42,10 @@ async def get_item_in_stock_value(db: AsyncSession) -> Decimal:
 # ------------------------- Get Stockout Items count ------------------------- #
 async def get_stockout_items_low_count(db: AsyncSession) -> int:
     result = await db.execute(
-        select(func.count(func.distinct(StockAlert.item_id))).where(
-            StockAlert.status == AlertStatus.LOW_STOCK
+        select(func.count(Item.item_id)).where(
+            Item.is_active == True,
+            Item.quantity_in_stock > 0,
+            Item.quantity_in_stock <= Item.reorder_level,
         )
     )
     return result.scalar_one()
@@ -52,18 +53,26 @@ async def get_stockout_items_low_count(db: AsyncSession) -> int:
 
 async def get_stockout_items_critical_count(db: AsyncSession) -> int:
     result = await db.execute(
-        select(func.count(func.distinct(StockAlert.item_id))).where(
-            StockAlert.status == AlertStatus.CRITICAL
+        select(func.count(Item.item_id)).where(
+            Item.is_active == True,
+            Item.quantity_in_stock <= 0,
         )
     )
     return result.scalar_one()
 
 
-# -------------------------- Existing Draft PO count ------------------------- #
+# -------------------------- Existing Active PO count ------------------------ #
 async def get_draft_po_count(db: AsyncSession) -> int:
     result = await db.execute(
-        select(func.count(func.distinct(PurchaseOrder.po_id))).where(
-            PurchaseOrder.po_type == POType.DRAFT
+        select(func.count(PurchaseOrder.po_id)).where(
+            PurchaseOrder.status.in_(
+                [
+                    POStatus.DRAFT,
+                    POStatus.PENDING_APPROVAL,
+                    POStatus.APPROVED,
+                    POStatus.PARTIALLY_RECEIVED,
+                ]
+            )
         )
     )
     return result.scalar_one()
@@ -73,19 +82,30 @@ async def get_draft_po_count(db: AsyncSession) -> int:
 async def get_current_month_sold_value(
     db: AsyncSession, user_id: Optional[uuid.UUID] = None
 ) -> Decimal:
-    now = datetime.now(local_tz)
+    now = datetime.now(timezone.utc)
+    start_of_month = datetime(now.year, now.month, 1, 0, 0, 0, tzinfo=timezone.utc)
+    if now.month == 12:
+        next_month_start = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    else:
+        next_month_start = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
     query = (
         select(
             func.coalesce(
-                func.sum(Transaction.quantity * Item.selling_price),
+                func.sum(
+                    case(
+                        (Transaction.unit_price.isnot(None), Transaction.quantity * Transaction.unit_price),
+                        else_=Transaction.quantity * Item.selling_price,
+                    )
+                ),
                 0,
             )
         )
         .join(Transaction.item)
         .where(
-            Transaction.transaction_type == TransactionType.STOCK_OUT,
-            extract("year", Transaction.transaction_date) == now.year,
-            extract("month", Transaction.transaction_date) == now.month,
+            Transaction.transaction_type.in_(SOLD_TYPES),
+            Transaction.transaction_date >= start_of_month,
+            Transaction.transaction_date < next_month_start,
         )
     )
 
@@ -93,62 +113,68 @@ async def get_current_month_sold_value(
         query = query.where(Transaction.user_id == user_id)
 
     result = await db.execute(query)
-    return Decimal(str(result.scalar_one()))
+    return Decimal(str(result.scalar_one() or 0)).quantize(Decimal("0.01"))
 
 
 # -------------------------------- Sales Trend ------------------------------- #
 async def get_last_7_days_sales(
     db: AsyncSession, user_id: Optional[uuid.UUID] = None
 ) -> Sequence[Decimal]:
-    # Get current local date (computed dynamically at call time)
-    today = datetime.now(local_tz).date()
+    now_utc = datetime.now(timezone.utc)
+    today = now_utc.date()
     start_date = today - timedelta(days=6)
-
-    # Cast timestamp to Date for daily grouping
-    date_col = cast(Transaction.transaction_date, Date)
+    start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    end_dt = datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc)
 
     query = (
         select(
-            date_col.label("date"),
-            func.sum(Transaction.quantity * Item.selling_price).label("daily_total"),
+            Transaction.transaction_date,
+            func.coalesce(
+                case(
+                    (Transaction.unit_price.isnot(None), Transaction.quantity * Transaction.unit_price),
+                    else_=Transaction.quantity * Item.selling_price,
+                ),
+                0,
+            ).label("amount"),
         )
         .join(Transaction.item)
         .where(
-            Transaction.transaction_type == TransactionType.STOCK_OUT,
-            date_col >= start_date,
-            date_col <= today,
+            Transaction.transaction_type.in_(SOLD_TYPES),
+            Transaction.transaction_date >= start_dt,
+            Transaction.transaction_date <= end_dt,
         )
     )
 
-    # Dynamically append user filter if user_id is provided
     if user_id is not None:
         query = query.where(Transaction.user_id == user_id)
 
-    query = query.group_by(date_col)
-
     result = await db.execute(query)
-    sales_by_date = {row.date: row.daily_total for row in result.all()}
-    last_7_days_totals: list[Decimal] = []
-    for i in range(7):
-        current_day = start_date + timedelta(days=i)
-        daily_val = sales_by_date.get(current_day, Decimal("0.00"))
-        last_7_days_totals.append(daily_val)
+    rows = result.fetchall()
 
-    return last_7_days_totals
+    daily_map = {start_date + timedelta(days=i): Decimal("0.00") for i in range(7)}
+    for row in rows:
+        tx_dt = row.transaction_date
+        if hasattr(tx_dt, "date"):
+            tx_d = tx_dt.date()
+        else:
+            tx_d = datetime.fromisoformat(str(tx_dt)[:10]).date()
+        if tx_d in daily_map:
+            daily_map[tx_d] += Decimal(str(row.amount or 0))
+
+    return [daily_map[start_date + timedelta(days=i)].quantize(Decimal("0.01")) for i in range(7)]
 
 
 # ------------------------ Get Most Sold Items ------------------------------- #
 async def get_most_sold_items(
     db: AsyncSession, limit: int = 5, user_id: Optional[uuid.UUID] = None
 ) -> Sequence[MostSoldItem]:
-    # Match the column aliases directly to your Pydantic field names
     query = (
         select(
             Item.item_name.label("name"),
             func.sum(Transaction.quantity).label("quantity_sold"),
         )
         .join(Transaction.item)
-        .where(Transaction.transaction_type == TransactionType.STOCK_OUT)
+        .where(Transaction.transaction_type.in_(SOLD_TYPES))
     )
 
     if user_id is not None:
@@ -174,11 +200,14 @@ async def get_most_sold_items(
 async def get_last_5_transactions(
     db: AsyncSession, user_id: Optional[uuid.UUID] = None
 ) -> Sequence[TransactionResponse]:
-    # Eagerly load .item and .user so Pydantic's model_validator doesn't
-    # trigger synchronous lazy-loads inside an async session (MissingGreenlet).
     query = (
         select(Transaction)
-        .options(selectinload(Transaction.item), selectinload(Transaction.user))
+        .options(
+            joinedload(Transaction.item),
+            joinedload(Transaction.user),
+            joinedload(Transaction.supplier),
+            joinedload(Transaction.batch),
+        )
         .order_by(Transaction.transaction_date.desc())
     )
 
@@ -187,6 +216,6 @@ async def get_last_5_transactions(
 
     query = query.limit(5)
     result = await db.execute(query)
-    db_transactions = result.scalars().all()
+    db_transactions = result.unique().scalars().all()
 
     return [TransactionResponse.model_validate(tx) for tx in db_transactions]

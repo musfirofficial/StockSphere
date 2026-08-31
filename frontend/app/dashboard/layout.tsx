@@ -36,7 +36,7 @@ const NAV_MAIN = [
   { key: "users", label: "Users", icon: Users, path: "/dashboard/users" },
   {
     key: "categories",
-    label: "Categories",
+    label: "Categories & Units",
     icon: Tags,
     path: "/dashboard/categories",
   },
@@ -52,12 +52,6 @@ const NAV_MAIN = [
     label: "Transactions",
     icon: ArrowLeftRight,
     path: "/dashboard/transactions",
-  },
-  {
-    key: "stock_alerts",
-    label: "Stock alerts",
-    icon: Bell,
-    path: "/dashboard/stock_alerts",
   },
   {
     key: "purchase_orders",
@@ -487,7 +481,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                             : activeItem.key === "items"
                               ? "Items"
                               : activeItem.key === "categories"
-                                ? "Categories"
+                                ? "Categories & Units"
                                 : activeItem.key === "reports"
                                   ? "Reports"
                                   : activeItem.key === "audit_logs"
@@ -509,14 +503,12 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                           : activeItem.key === "purchase_orders"
                             ? "Manage and generate supplier purchase orders"
                             : activeItem.key === "categories"
-                              ? "Manage inventroy stock categories"
+                              ? "Manage product classifications and standardized measurement units"
                               : activeItem.key === "items"
                                 ? "Manage and track warehouse stocks"
                                 : activeItem.key === "reports"
                                   ? "Manage and generate inventory metrics"
-                                  : activeItem.key === "reports"
-                                    ? "Manage and generate inventory metrics"
-                                    : "Here's what's happening with your inventory today."}
+                                  : "Here's what's happening with your inventory today."}
                 </div>
               </div>
               {/* Page-specific action buttons injected by individual pages */}
@@ -556,7 +548,7 @@ function DashboardLayoutInner({ children }: { children: React.ReactNode }) {
                             : activeItem.key === "items"
                               ? "Inventory"
                               : activeItem.key === "categories"
-                                ? "Categories"
+                                ? "Categories & Units"
                                 : activeItem.key === "reports"
                                   ? "Reports"
                                   : activeItem.key === "audit_logs"

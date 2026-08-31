@@ -1,24 +1,61 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
-  Search,
   Plus,
   Pencil,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
   X,
   Check,
   Package,
   ChevronDown,
-  Filter
+  Filter,
+  Radio,
+  Building2,
+  DollarSign,
+  AlertCircle,
+  Layers,
+  ArrowLeft,
+  Calendar,
+  Tag,
+  Boxes,
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
 import { useData, Item, Category, Supplier } from "../DataContext";
 import { isReadOnly, isSalesRole } from "@/lib/roles";
 import { apiFetch } from "@/lib/api";
-import { Checkbox as Cb, StatusBadge, Modal, SearchBar, Pagination, ConfirmDeleteModal } from "@/components/ui";
+import { Checkbox as Cb, Modal, SearchBar, Pagination, ConfirmDeleteModal } from "@/components/ui";
+
+// ── Types ──────────────────────────────────────────────────
+interface UnitOption {
+  unit_id: string;
+  unit_name: string;
+  unit_symbol: string;
+}
+
+interface ItemSupplierLink {
+  item_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  agreed_price: number;
+  is_primary: boolean;
+  supplier_sku?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface StockBatchInfo {
+  batch_id: string;
+  batch_number: string;
+  supplier_id: string;
+  supplier_name?: string;
+  purchase_price: number;
+  selling_price?: number | null;
+  current_quantity: number;
+  initial_quantity: number;
+  expiry_date?: string | null;
+  received_date: string;
+}
 
 interface FieldProps {
   label: string;
@@ -57,114 +94,134 @@ const inp = (c: any) => ({
   fontFamily: "inherit",
 });
 
-// ============================================================================
-// Helper Components & Sub-Modals
-// ============================================================================
+// ── Health Minimal Indicator ───────────────────────────────
+function HealthIndicator({ status }: { status?: string }) {
+  const s = status?.toUpperCase() || "HEALTHY";
+  if (s === "CRITICAL") {
+    return (
+      <span style={{ fontSize: 12.5, fontWeight: 500, color: "#DC2626", display: "inline-flex", alignItems: "center", gap: 5 }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#DC2626" }} />
+        Critical (Out of Stock)
+      </span>
+    );
+  }
+  if (s === "LOW_STOCK") {
+    return (
+      <span style={{ fontSize: 12.5, fontWeight: 500, color: "#D97706", display: "inline-flex", alignItems: "center", gap: 5 }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#D97706" }} />
+        Low Stock
+      </span>
+    );
+  }
+  return (
+    <span style={{ fontSize: 12.5, fontWeight: 500, color: "#2E7D32", display: "inline-flex", alignItems: "center", gap: 5 }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2E7D32" }} />
+      Healthy
+    </span>
+  );
+}
 
-// ── Create Item Modal ──────────────────────────────────────
+// ============================================================================
+// Create Item Modal (NO Supplier field at creation time)
+// ============================================================================
 interface CreateItemModalProps {
   onClose: () => void;
-  onSave: (item: Partial<Item>) => void;
+  onSubmit: (item: any) => void;
   categoryList: Category[];
-  supplierList: Supplier[];
+  units: UnitOption[];
   c: any;
 }
-function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: CreateItemModalProps) {
+function CreateItemModal({
+  onClose,
+  onSubmit,
+  categoryList,
+  units,
+  c,
+}: CreateItemModalProps) {
   const [itemName, setItemName] = useState("");
   const [sku, setSku] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState(categoryList[0]?.name || "");
-  const [supplier, setSupplier] = useState(supplierList[0]?.supplierName || "");
-  const [quantity, setQuantity] = useState(0);
-  const [unit, setUnit] = useState("pcs");
-  const [costPrice, setCostPrice] = useState(0);
-  const [sellingPrice, setSellingPrice] = useState(0);
-  const [reorderLevel, setReorderLevel] = useState(0);
-  const [reorderQuantity, setReorderQuantity] = useState(0);
-  const [active, setActive] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!category && categoryList.length > 0) {
-      setCategory(categoryList[0].name);
-    }
-  }, [categoryList, category]);
-
-  useEffect(() => {
-    if (!supplier && supplierList.length > 0) {
-      setSupplier(supplierList[0].supplierName);
-    }
-  }, [supplierList, supplier]);
+  const [unit, setUnit] = useState(units[0]?.unit_symbol || "pcs");
+  const [costPrice, setCostPrice] = useState("");
+  const [sellingPrice, setSellingPrice] = useState("");
+  const [reorderLevel, setReorderLevel] = useState("10");
+  const [reorderQuantity, setReorderQuantity] = useState("25");
+  const [err, setErr] = useState("");
 
   const handleSubmit = () => {
-    setError("");
-    if (!itemName.trim() || !sku.trim() || !unit.trim() || !category || !supplier) {
-      setError("Item Name, SKU, Category, Supplier, and Unit are required.");
+    setErr("");
+    if (!itemName.trim() || !sku.trim() || !costPrice || !sellingPrice) {
+      setErr("Item name, SKU, Cost Price, and Selling Price are required.");
       return;
     }
-    onSave({
-      itemName,
-      sku,
-      description,
+    const cPrice = parseFloat(costPrice);
+    const sPrice = parseFloat(sellingPrice);
+    if (isNaN(cPrice) || cPrice <= 0 || isNaN(sPrice) || sPrice <= 0) {
+      setErr("Prices must be valid positive numbers.");
+      return;
+    }
+    onSubmit({
+      itemName: itemName.trim(),
+      sku: sku.trim().toUpperCase(),
+      description: description.trim(),
       category,
-      supplier,
-      quantity: Number(quantity) || 0,
       unit,
-      costPrice: Number(costPrice) || 0,
-      sellingPrice: Number(sellingPrice) || 0,
-      reorderLevel: Number(reorderLevel) || 0,
-      reorderQuantity: Number(reorderQuantity) || 0,
-      active,
+      costPrice: cPrice,
+      sellingPrice: sPrice,
+      reorderLevel: parseInt(reorderLevel, 10) || 10,
+      reorderQuantity: parseInt(reorderQuantity, 10) || 25,
     });
   };
 
   return (
-    <Modal title="Create New Inventory Item" onClose={onClose} c={c} width={500} closeOnOverlayClick={false}>
+    <Modal title="Create New Item" onClose={onClose} c={c} width={520}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {error && (
+        {err && (
           <div
             style={{
-              padding: "8px 12px",
+              padding: "9px 12px",
               background: c.dangerSoft,
               color: c.danger,
               borderRadius: 8,
               fontSize: 12.5,
-              fontWeight: 500,
             }}
           >
-            {error}
+            {err}
           </div>
         )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Item Name" c={c}>
+          <Field label="Item Name *" c={c}>
             <input
               style={inp(c)}
               value={itemName}
               onChange={(e) => setItemName(e.target.value)}
-              placeholder="e.g. Copper Wire 2.5mm"
+              placeholder="e.g. White Emulsion Paint 5L"
             />
           </Field>
-          <Field label="SKU" c={c}>
+          <Field label="SKU / Item Code *" c={c}>
             <input
               style={inp(c)}
               value={sku}
               onChange={(e) => setSku(e.target.value)}
-              placeholder="e.g. SKU-1234"
+              placeholder="e.g. PNT-1001"
             />
           </Field>
         </div>
 
         <Field label="Description" c={c}>
           <textarea
-            style={{ ...inp(c), height: 50, resize: "vertical" }}
+            rows={2}
+            style={{ ...inp(c), resize: "vertical" }}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Product details, measurements, or specs..."
+            placeholder="Product details, material, or specifications..."
           />
         </Field>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Category" c={c}>
+          <Field label="Category *" c={c}>
             <select
               style={inp(c)}
               value={category}
@@ -177,15 +234,15 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
               ))}
             </select>
           </Field>
-          <Field label="Supplier" c={c}>
+          <Field label="Measurement Unit *" c={c}>
             <select
               style={inp(c)}
-              value={supplier}
-              onChange={(e) => setSupplier(e.target.value)}
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
             >
-              {supplierList.map((supp) => (
-                <option key={supp.id} value={supp.supplierName}>
-                  {supp.supplierName}
+              {units.map((u) => (
+                <option key={u.unit_id} value={u.unit_symbol}>
+                  {u.unit_name} ({u.unit_symbol})
                 </option>
               ))}
             </select>
@@ -193,89 +250,66 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Quantity in Stock" c={c}>
+          <Field label="Cost Price ($) *" c={c}>
             <input
               type="number"
-              min="0"
-              style={inp(c)}
-              value={quantity}
-              onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-            />
-          </Field>
-          <Field label="Unit" c={c}>
-            <input
-              style={inp(c)}
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-              placeholder="e.g. pcs, meters, rolls"
-            />
-          </Field>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Cost Price (Rs)" c={c}>
-            <input
-              type="number"
-              min="0"
+              min="0.01"
               step="0.01"
               style={inp(c)}
               value={costPrice}
-              onChange={(e) => setCostPrice(parseFloat(e.target.value) || 0)}
+              onChange={(e) => setCostPrice(e.target.value)}
+              placeholder="0.00"
             />
           </Field>
-          <Field label="Selling Price (Rs)" c={c}>
+          <Field label="Default Selling Price ($) *" c={c}>
             <input
               type="number"
-              min="0"
+              min="0.01"
               step="0.01"
               style={inp(c)}
               value={sellingPrice}
-              onChange={(e) => setSellingPrice(parseFloat(e.target.value) || 0)}
+              onChange={(e) => setSellingPrice(e.target.value)}
+              placeholder="0.00"
             />
           </Field>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Reorder Level" c={c}>
+          <Field label="Reorder Alert Level" c={c}>
             <input
               type="number"
               min="0"
               style={inp(c)}
               value={reorderLevel}
-              onChange={(e) => setReorderLevel(parseInt(e.target.value) || 0)}
+              onChange={(e) => setReorderLevel(e.target.value)}
             />
           </Field>
-          <Field label="Reorder Quantity" c={c}>
+          <Field label="Default Reorder Qty" c={c}>
             <input
               type="number"
               min="0"
               style={inp(c)}
               value={reorderQuantity}
-              onChange={(e) => setReorderQuantity(parseInt(e.target.value) || 0)}
+              onChange={(e) => setReorderQuantity(e.target.value)}
             />
           </Field>
         </div>
 
-        <Field label="Is Active" c={c}>
-          <select
-            style={inp(c)}
-            value={active ? "active" : "inactive"}
-            onChange={(e) => setActive(e.target.value === "active")}
-          >
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </Field>
-
         <div
           style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            marginTop: 12,
+            padding: "8px 12px",
+            background: c.surfaceMuted,
+            borderRadius: 8,
+            fontSize: 12,
+            color: c.textMuted,
           }}
         >
+          💡 Suppliers and agreed purchase prices can be assigned from the Item Details view after creation.
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
           <button
+            type="button"
             onClick={onClose}
             style={{
               padding: "8px 14px",
@@ -292,6 +326,7 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSubmit}
             style={{
               padding: "8px 16px",
@@ -305,7 +340,7 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
               fontFamily: "inherit",
             }}
           >
-            Add item
+            Create Item
           </button>
         </div>
       </div>
@@ -313,86 +348,95 @@ function CreateItemModal({ onClose, onSave, categoryList, supplierList, c }: Cre
   );
 }
 
-
-
 // ============================================================================
 // Main Page Component
 // ============================================================================
-
 export default function ItemsPage() {
-  const { mode, c } = useTheme();
+  const { c } = useTheme();
   const {
     itemList,
-    setItemList,
     categoryList,
-    setCategoryList,
     supplierList,
-    setSupplierList,
     setHeaderActions,
     loggedInUser,
-    addItem,
-    saveItemEdit,
-    deleteItem,
+    fetchItems,
     fetchCategories,
     fetchSuppliers,
-    fetchItems,
     refreshItems,
   } = useData();
 
-  // Derive read-only and sales flags from role
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "items");
   const isSales = isSalesRole(loggedInUser?.role ?? "");
 
-  // --------------------------------------------------------------------------
-  // State Management
-  // --------------------------------------------------------------------------
+  const [loadingItems, setLoadingItems] = useState(false);
+
+  // Units list
+  const [units, setUnits] = useState<UnitOption[]>([
+    { unit_id: "1", unit_name: "Pieces", unit_symbol: "pcs" },
+    { unit_id: "2", unit_name: "Kilograms", unit_symbol: "kg" },
+    { unit_id: "3", unit_name: "Grams", unit_symbol: "g" },
+    { unit_id: "4", unit_name: "Liters", unit_symbol: "L" },
+    { unit_id: "5", unit_name: "Meters", unit_symbol: "m" },
+    { unit_id: "6", unit_name: "Boxes", unit_symbol: "box" },
+  ]);
+
   // Selected checkboxes
   const [selected, setSelected] = useState<string[]>([]);
-  // Text search filter
   const [itemSearch, setItemSearch] = useState("");
 
-  // Dropdown states for filters
-  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
-  const [supplierFilterOpen, setSupplierFilterOpen] = useState(false);
-
-  // Selected filter criteria
+  // Filters
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedSupplier, setSelectedSupplier] = useState<string | null>(null);
+  const [selectedHealth, setSelectedHealth] = useState<string | null>(null);
+  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
+  const [healthFilterOpen, setHealthFilterOpen] = useState(false);
 
-  // Search terms inside the dropdown filters
-  const [catSearch, setCatSearch] = useState("");
-  const [suppSearch, setSuppSearch] = useState("");
+  // Dedicated Full-Page Item Details State
+  const [viewingItem, setViewingItem] = useState<Item | null>(null);
+  const [itemSuppliers, setItemSuppliers] = useState<ItemSupplierLink[]>([]);
+  const [itemBatches, setItemBatches] = useState<StockBatchInfo[]>([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
-  // Detail / Edit slide panel states
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<Item>>({});
-  const [editError, setEditError] = useState("");
+  // Add Supplier Link Form
+  const [isLinkingSupplier, setIsLinkingSupplier] = useState(false);
+  const [newSupplierId, setNewSupplierId] = useState("");
+  const [newAgreedPrice, setNewAgreedPrice] = useState("");
+  const [newSupplierSku, setNewSupplierSku] = useState("");
+  const [newIsPrimary, setNewIsPrimary] = useState(false);
+  const [supplierFormError, setSupplierFormError] = useState("");
 
-  // Modal open states
+  // Editing agreed price inline
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
+  const [editAgreedPrice, setEditAgreedPrice] = useState("");
+
+  // Modals
   const [addItemOpen, setAddItemOpen] = useState(false);
+  const [isEditingItem, setIsEditingItem] = useState(false);
+  const [editForm, setEditForm] = useState<any>({});
+  const [editError, setEditError] = useState("");
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
-  // Pagination states
+  // Pagination
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 8;
-
-  // Responsive state
-  const [isMobile, setIsMobile] = useState(false);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
+    setLoadingItems(true);
+    fetchItems().finally(() => setLoadingItems(false));
+    fetchCategories();
+    fetchSuppliers();
+    apiFetch<UnitOption[]>("/units/")
+      .then((data) => {
+        if (data && data.length > 0) setUnits(data);
+      })
+      .catch(() => {});
+  }, [fetchItems, fetchCategories, fetchSuppliers]);
 
-  // --------------------------------------------------------------------------
-  // Effects & Header Actions
-  // --------------------------------------------------------------------------
-  // Set page header actions dynamically — hidden for read-only roles
+  // Set top header action
   useEffect(() => {
-    if (readOnly) {
+    if (readOnly || viewingItem) {
       setHeaderActions(null);
       return;
     }
@@ -414,38 +458,43 @@ export default function ItemsPage() {
           fontFamily: "inherit",
         }}
       >
-        <Plus size={15} /> New item
+        <Plus size={15} /> Add Item
       </button>
     );
     return () => setHeaderActions(null);
-  }, [c, setHeaderActions, readOnly]);
+  }, [c, setHeaderActions, readOnly, viewingItem]);
 
-  // Sync edit form fields when selecting another item
-  useEffect(() => {
-    if (selectedItem) {
-      setEditForm(selectedItem);
-      setEditError("");
+  // Load detailed suppliers & batches for viewingItem
+  const loadItemDetails = async (itemId: string) => {
+    setLoadingDetails(true);
+    try {
+      const [supData, batchData] = await Promise.all([
+        apiFetch<ItemSupplierLink[]>(`/items/${itemId}/suppliers`).catch(() => []),
+        apiFetch<StockBatchInfo[]>(`/transaction/batches/${itemId}`).catch(() => []),
+      ]);
+      setItemSuppliers(supData || []);
+      setItemBatches(batchData || []);
+    } finally {
+      setLoadingDetails(false);
     }
-  }, [selectedItem]);
+  };
 
-  // Filtered lists for dropdown contents
-  const filteredCategoriesForDropdown = useMemo(() => {
-    return categoryList.filter((cat) =>
-      cat.name.toLowerCase().includes(catSearch.toLowerCase())
-    );
-  }, [categoryList, catSearch]);
+  useEffect(() => {
+    if (viewingItem) {
+      setEditForm(viewingItem);
+      setEditError("");
+      setIsLinkingSupplier(false);
+      setSupplierFormError("");
+      setEditingSupplierId(null);
+      loadItemDetails(viewingItem.id);
+    }
+  }, [viewingItem]);
 
-  const filteredSuppliersForDropdown = useMemo(() => {
-    return supplierList.filter((supp) =>
-      supp.supplierName.toLowerCase().includes(suppSearch.toLowerCase())
-    );
-  }, [supplierList, suppSearch]);
-
-  // Filter main inventory item list based on search and selected category/supplier filters
+  // Filter main inventory list
   const filteredItems = useMemo(() => {
     return itemList
       .filter((item) => {
-        const q = itemSearch.toLowerCase();
+        const q = itemSearch.toLowerCase().trim();
         const matchesSearch =
           !q ||
           item.itemName.toLowerCase().includes(q) ||
@@ -453,12 +502,12 @@ export default function ItemsPage() {
           (item.description && item.description.toLowerCase().includes(q));
 
         const matchesCategory = !selectedCategory || item.category === selectedCategory;
-        const matchesSupplier = !selectedSupplier || item.supplier === selectedSupplier;
+        const matchesHealth = !selectedHealth || item.healthStatus === selectedHealth;
 
-        return matchesSearch && matchesCategory && matchesSupplier;
+        return matchesSearch && matchesCategory && matchesHealth;
       })
       .sort((a, b) => a.itemName.localeCompare(b.itemName));
-  }, [itemList, itemSearch, selectedCategory, selectedSupplier]);
+  }, [itemList, itemSearch, selectedCategory, selectedHealth]);
 
   const totalCount = filteredItems.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -470,11 +519,8 @@ export default function ItemsPage() {
   const allPageSelected =
     pageItems.length > 0 && pageItems.every((item) => selected.includes(item.id));
 
-  // Handlers
   const toggleOne = (id: string, checked: boolean) => {
-    setSelected((prev) =>
-      checked ? [...prev, id] : prev.filter((x) => x !== id)
-    );
+    setSelected((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
   };
 
   const toggleAllPage = () => {
@@ -492,62 +538,14 @@ export default function ItemsPage() {
     }
   };
 
-  // Load categories, suppliers, and items from backend API
-  const loadCategoriesAndSuppliers = async () => {
-    try {
-      await Promise.all([
-        fetchCategories(),
-        fetchSuppliers(),
-      ]);
-    } catch (err: any) {
-      console.error("Failed to load categories/suppliers:", err);
-    }
-  };
-
-  const loadItemsFromBackend = async () => {
-    try {
-      const data = await apiFetch<any[]>("/items/");
-      const mapped: Item[] = data.map((item: any) => ({
-        id: item.item_id,
-        sku: item.sku,
-        itemName: item.item_name,
-        description: item.description || "",
-        category: item.category_name || (categoryList.find((c) => c.id === item.category_id)?.name) || "",
-        supplier: item.supplier_name || (supplierList.find((s) => s.id === item.supplier_id)?.supplierName) || "",
-        quantity: item.quantity_in_stock,
-        unit: item.unit,
-        costPrice: item.cost_price ?? null,
-        sellingPrice: item.selling_price,
-        reorderLevel: item.reorder_level,
-        reorderQuantity: item.reorder_quantity,
-        active: item.is_active,
-        createdAt: item.created_at,
-        updatedAt: item.updated_at,
-      }));
-      setItemList(mapped);
-    } catch (err: any) {
-      console.error("Failed to load items from backend:", err);
-    }
-  };
-
-  useEffect(() => {
-    loadCategoriesAndSuppliers();
-    fetchItems();
-  }, []);
-
+  // Create Item handler
   const handleCreateItem = async (newItem: any) => {
-    // Find category_id and supplier_id from categoryList and supplierList
     const cat = categoryList.find((c) => c.name === newItem.category);
-    const supp = supplierList.find((s) => s.supplierName === newItem.supplier);
-
     if (!cat) {
       alert("Selected category is invalid.");
       return;
     }
-    if (!supp) {
-      alert("Selected supplier is invalid.");
-      return;
-    }
+    const matchingUnit = units.find((u) => u.unit_symbol === newItem.unit);
 
     try {
       await apiFetch("/items/", {
@@ -557,13 +555,13 @@ export default function ItemsPage() {
           sku: newItem.sku,
           description: newItem.description || null,
           category_id: cat.id,
-          supplier_id: supp.id,
-          quantity_in_stock: Number(newItem.quantity) || 0,
-          reorder_quantity: Number(newItem.reorderQuantity) || 0,
+          unit_id: matchingUnit ? matchingUnit.unit_id : null,
           unit: newItem.unit,
-          cost_price: Number(newItem.costPrice) || 0.01,
-          selling_price: Number(newItem.sellingPrice) || 0.01,
-          reorder_level: Number(newItem.reorderLevel) || 0,
+          cost_price: Number(newItem.costPrice),
+          selling_price: Number(newItem.sellingPrice),
+          reorder_level: Number(newItem.reorderLevel),
+          reorder_quantity: Number(newItem.reorderQuantity),
+          quantity_in_stock: 0,
         }),
       });
       await refreshItems();
@@ -574,1157 +572,1170 @@ export default function ItemsPage() {
     }
   };
 
-  const handleSaveEdit = async (form: Partial<Item>) => {
+  // Save general item edits
+  const handleSaveItemEdit = async () => {
+    if (!viewingItem) return;
     setEditError("");
-    if (!form.itemName?.trim() || !form.sku?.trim() || !form.unit?.trim() || !form.category) {
-      setEditError("Item Name, SKU, Category, and Unit are required.");
-      return;
-    }
 
-    const cat = categoryList.find((c) => c.name === form.category);
-    const supp = supplierList.find((s) => s.supplierName === form.supplier);
+    const cat = categoryList.find((c) => c.name === editForm.category);
+    const matchingUnit = units.find((u) => u.unit_symbol === editForm.unit);
 
     try {
       const body: any = {};
-      if (form.itemName && form.itemName !== selectedItem?.itemName) {
-        body.item_name = form.itemName;
+      if (editForm.itemName && editForm.itemName !== viewingItem.itemName) {
+        body.item_name = editForm.itemName;
       }
-      if (form.sku && form.sku !== selectedItem?.sku) {
-        body.sku = form.sku;
+      if (editForm.sku && editForm.sku !== viewingItem.sku) {
+        body.sku = editForm.sku;
       }
-      if ((form.description || null) !== (selectedItem?.description || null)) {
-        body.description = form.description || null;
+      if (editForm.description !== undefined && editForm.description !== viewingItem.description) {
+        body.description = editForm.description || null;
       }
-      if (form.unit && form.unit !== selectedItem?.unit) {
-        body.unit = form.unit;
+      if (editForm.unit && editForm.unit !== viewingItem.unit) {
+        body.unit = editForm.unit;
+        if (matchingUnit) body.unit_id = matchingUnit.unit_id;
       }
-      if (form.sellingPrice !== undefined && Number(form.sellingPrice) !== Number(selectedItem?.sellingPrice)) {
-        body.selling_price = Number(form.sellingPrice);
+      if (editForm.sellingPrice !== undefined && Number(editForm.sellingPrice) !== Number(viewingItem.sellingPrice)) {
+        body.selling_price = Number(editForm.sellingPrice);
       }
-      if (form.reorderLevel !== undefined && Number(form.reorderLevel) !== Number(selectedItem?.reorderLevel)) {
-        body.reorder_level = Number(form.reorderLevel);
+      if (editForm.costPrice !== undefined && Number(editForm.costPrice) !== Number(viewingItem.costPrice)) {
+        body.cost_price = Number(editForm.costPrice);
       }
-      if (form.reorderQuantity !== undefined && Number(form.reorderQuantity) !== Number(selectedItem?.reorderQuantity)) {
-        body.reorder_quantity = Number(form.reorderQuantity);
+      if (editForm.reorderLevel !== undefined && Number(editForm.reorderLevel) !== Number(viewingItem.reorderLevel)) {
+        body.reorder_level = Number(editForm.reorderLevel);
       }
-      if (form.costPrice !== undefined && form.costPrice !== null && Number(form.costPrice) !== Number(selectedItem?.costPrice)) {
-        body.cost_price = Number(form.costPrice);
+      if (editForm.reorderQuantity !== undefined && Number(editForm.reorderQuantity) !== Number(viewingItem.reorderQuantity)) {
+        body.reorder_quantity = Number(editForm.reorderQuantity);
       }
-      if (form.active !== undefined && form.active !== selectedItem?.active) {
-        body.is_active = form.active;
+      if (editForm.active !== undefined && editForm.active !== viewingItem.active) {
+        body.is_active = editForm.active;
       }
-      if (cat && form.category !== selectedItem?.category) {
+      if (cat && editForm.category !== viewingItem.category) {
         body.category_id = cat.id;
-      }
-      if (supp && form.supplier !== selectedItem?.supplier) {
-        body.supplier_id = supp.id;
       }
 
       if (Object.keys(body).length === 0) {
-        setIsEditing(false);
+        setIsEditingItem(false);
         return;
       }
 
-      const updated = await apiFetch<any>(`/items/${form.id}`, {
+      const updated = await apiFetch<any>(`/items/${viewingItem.id}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       });
 
       await refreshItems();
-
-      const updatedMapped: Item = {
-        id: updated.item_id,
-        sku: updated.sku,
-        itemName: updated.item_name,
-        description: updated.description || "",
-        category: updated.category_name || form.category || "",
-        supplier: updated.supplier_name || form.supplier || "",
-        quantity: updated.quantity_in_stock,
-        unit: updated.unit,
-        costPrice: updated.cost_price ?? null,
-        sellingPrice: updated.selling_price,
-        reorderLevel: updated.reorder_level,
-        reorderQuantity: updated.reorder_quantity,
-        active: updated.is_active,
-        createdAt: updated.created_at,
-        updatedAt: updated.updated_at,
-      };
-
-      setSelectedItem(updatedMapped);
-      setIsEditing(false);
+      setViewingItem((prev) =>
+        prev
+          ? {
+              ...prev,
+              itemName: updated.item_name,
+              sku: updated.sku,
+              description: updated.description || "",
+              category: updated.category_name || prev.category,
+              unit: updated.unit,
+              costPrice: updated.cost_price,
+              sellingPrice: updated.selling_price,
+              reorderLevel: updated.reorder_level,
+              reorderQuantity: updated.reorder_quantity,
+              active: updated.is_active,
+            }
+          : null
+      );
+      setIsEditingItem(false);
     } catch (err: any) {
       setEditError(err.message || "Failed to update item.");
     }
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!itemToDelete) return;
+  const handleToggleItemActive = async () => {
+    if (!viewingItem) return;
     try {
-      await apiFetch(`/items/${itemToDelete.id}`, {
-        method: "DELETE",
+      const nextActive = !viewingItem.active;
+      await apiFetch(`/items/${viewingItem.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: nextActive }),
       });
       await refreshItems();
-      setSelected((prev) => prev.filter((x) => x !== itemToDelete.id));
-      if (selectedItem?.id === itemToDelete.id) {
-        setSelectedItem(null);
+      setViewingItem((prev) => (prev ? { ...prev, active: nextActive } : null));
+    } catch (err: any) {
+      alert(err.message || "Failed to update item status.");
+    }
+  };
+
+  // Delete item
+  const handleDeleteItem = async () => {
+    if (!itemToDelete) return;
+    try {
+      await apiFetch(`/items/${itemToDelete.id}`, { method: "DELETE" });
+      await refreshItems();
+      if (viewingItem?.id === itemToDelete.id) {
+        setViewingItem(null);
       }
+      setDeleteConfirmOpen(false);
       setItemToDelete(null);
     } catch (err: any) {
       alert(err.message || "Failed to delete item.");
     }
   };
 
-  const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
+  const handleBatchDeleteItems = async () => {
+    if (selected.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      let successCount = 0;
+      const errors: string[] = [];
+      for (const id of selected) {
+        try {
+          await apiFetch(`/items/${id}`, { method: "DELETE" });
+          successCount++;
+        } catch (err: any) {
+          errors.push(err.message || "Failed to delete item");
+        }
+      }
+      setSelected([]);
+      setBatchDeleteOpen(false);
+      if (viewingItem && selected.includes(viewingItem.id)) {
+        setViewingItem(null);
+      }
+      await refreshItems();
+      if (errors.length > 0) {
+        alert(`Deleted ${successCount} item(s). Note: ${errors.join(", ")}`);
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to delete selected items.");
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
 
-  return (
-    <div style={{ position: "relative", height: "100%", width: "100%" }}>
-      <div
-        style={{
-          display: "flex",
-          height: "100%",
-          gap: 20,
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        {/* Table List Section */}
+  // Link a supplier to item
+  const handleLinkSupplier = async () => {
+    if (!viewingItem) return;
+    setSupplierFormError("");
+
+    if (!newSupplierId) {
+      setSupplierFormError("Please select a supplier.");
+      return;
+    }
+    const price = parseFloat(newAgreedPrice);
+    if (isNaN(price) || price <= 0) {
+      setSupplierFormError("Agreed purchase price must be a valid positive number.");
+      return;
+    }
+
+    try {
+      await apiFetch(`/items/${viewingItem.id}/suppliers`, {
+        method: "POST",
+        body: JSON.stringify({
+          supplier_id: newSupplierId,
+          agreed_price: price,
+          is_primary: newIsPrimary,
+          supplier_sku: newSupplierSku.trim() || null,
+        }),
+      });
+
+      await loadItemDetails(viewingItem.id);
+      setIsLinkingSupplier(false);
+      setNewSupplierId("");
+      setNewAgreedPrice("");
+      setNewSupplierSku("");
+      setNewIsPrimary(false);
+    } catch (err: any) {
+      setSupplierFormError(err.message || "Failed to link supplier.");
+    }
+  };
+
+  // Set supplier as primary
+  const handleSetPrimary = async (supplierId: string) => {
+    if (!viewingItem) return;
+    try {
+      await apiFetch(`/items/${viewingItem.id}/suppliers/${supplierId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_primary: true }),
+      });
+      await loadItemDetails(viewingItem.id);
+    } catch (err: any) {
+      alert(err.message || "Failed to set primary supplier.");
+    }
+  };
+
+  // Update agreed price inline
+  const handleSaveAgreedPrice = async (supplierId: string) => {
+    if (!viewingItem) return;
+    const price = parseFloat(editAgreedPrice);
+    if (isNaN(price) || price <= 0) {
+      alert("Please enter a valid positive price.");
+      return;
+    }
+
+    try {
+      await apiFetch(`/items/${viewingItem.id}/suppliers/${supplierId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ agreed_price: price }),
+      });
+      setEditingSupplierId(null);
+      await loadItemDetails(viewingItem.id);
+    } catch (err: any) {
+      alert(err.message || "Failed to update agreed price.");
+    }
+  };
+
+  // Remove supplier link
+  const handleUnlinkSupplier = async (supplierId: string) => {
+    if (!viewingItem) return;
+    if (!confirm("Are you sure you want to remove this supplier link?")) return;
+
+    try {
+      await apiFetch(`/items/${viewingItem.id}/suppliers/${supplierId}`, {
+        method: "DELETE",
+      });
+      await loadItemDetails(viewingItem.id);
+    } catch (err: any) {
+      alert(err.message || "Failed to remove supplier.");
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // DEDICATED FULL-PAGE ITEM DETAILS VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  if (viewingItem) {
+    const unlinkedSuppliers = supplierList.filter(
+      (s) => s.active && !itemSuppliers.some((link) => link.supplier_id === s.id)
+    );
+
+    const marginPct =
+      viewingItem.costPrice && viewingItem.sellingPrice && viewingItem.costPrice > 0
+        ? Math.round(((viewingItem.sellingPrice - viewingItem.costPrice) / viewingItem.sellingPrice) * 100)
+        : null;
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Top Navigation & Action Header */}
         <div
           style={{
-            flex: 1,
             display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-            height: "100%",
-            background: c.surface,
-            border: `1px solid ${c.border}`,
-            borderRadius: 14,
-            overflow: "hidden",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
+            borderBottom: `1px solid ${c.border}`,
+            paddingBottom: 14,
           }}
         >
-          {/* ---------------------------------------------------------------------- */}
-          {/* Toolbar & Search Bar                                                  */}
-          {/* ---------------------------------------------------------------------- */}
-          {/* Toolbar */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "13px 20px",
-              borderBottom: `1px solid ${c.border}`,
-              flexWrap: "wrap",
-              gap: 12,
-            }}
-          >
-            {/* Selection indicators */}
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Cb checked={allPageSelected} onChange={toggleAllPage} c={c} />
-                <span
-                  style={{
-                    fontSize: 12.5,
-                    color: c.textMuted,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {selected.length > 0 ? `${selected.length} selected` : "Select all"}
-                </span>
-              </div>
-              {selected.length > 0 && (
-                <button
-                  onClick={() => setSelected([])}
-                  style={{
-                    fontSize: 12.5,
-                    color: c.textMuted,
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontWeight: 500,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  Deselect all
-                </button>
-              )}
-            </div>
-
-            {/* Filter controls and Search */}
-            <div
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button
+              onClick={() => setViewingItem(null)}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-                flex: 1,
-                justifyContent: "flex-end",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
               }}
             >
-              {/* Category Filter Dropdown */}
-              <div style={{ position: "relative" }}>
-                <button
-                  onClick={() => {
-                    setCategoryFilterOpen(!categoryFilterOpen);
-                    setSupplierFilterOpen(false);
-                    setCatSearch("");
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: `1px solid ${selectedCategory ? c.accent : c.border}`,
-                    background: selectedCategory ? c.accentSoft : c.surface,
-                    color: selectedCategory ? c.accent : c.text,
-                    fontSize: 12.5,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  <Filter size={13} />
-                  <span>
-                    {selectedCategory ? `Cat: ${selectedCategory}` : "All Categories"}
-                  </span>
-                  <ChevronDown size={13} />
-                </button>
-
-                {categoryFilterOpen && (
-                  <>
-                    <div
-                      onClick={() => setCategoryFilterOpen(false)}
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 100,
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "calc(100% + 6px)",
-                        right: 0,
-                        width: 220,
-                        background: c.surface,
-                        border: `1px solid ${c.border}`,
-                        borderRadius: 10,
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                        zIndex: 101,
-                        padding: 6,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "6px 8px",
-                          borderRadius: 6,
-                          border: `1px solid ${c.border}`,
-                          background: c.inputBg,
-                        }}
-                      >
-                        <Search size={12} color={c.textFaint} />
-                        <input
-                          value={catSearch}
-                          onChange={(e) => setCatSearch(e.target.value)}
-                          placeholder="Search categories..."
-                          style={{
-                            border: "none",
-                            outline: "none",
-                            background: "transparent",
-                            color: c.text,
-                            fontSize: 12,
-                            width: "100%",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </div>
-                      <div style={{ maxHeight: 180, overflowY: "auto" }}>
-                        <button
-                          onClick={() => {
-                            setSelectedCategory(null);
-                            setCategoryFilterOpen(false);
-                            setPage(1);
-                          }}
-                          style={{
-                            width: "100%",
-                            padding: "7px 10px",
-                            textAlign: "left",
-                            fontSize: 12.5,
-                            border: "none",
-                            background: !selectedCategory ? c.accentSoft : "transparent",
-                            color: !selectedCategory ? c.accent : c.text,
-                            fontWeight: !selectedCategory ? 600 : 400,
-                            cursor: "pointer",
-                            borderRadius: 4,
-                          }}
-                        >
-                          All Categories
-                        </button>
-                        {filteredCategoriesForDropdown.map((cat) => (
-                          <button
-                            key={cat.id}
-                            onClick={() => {
-                              setSelectedCategory(cat.name);
-                              setCategoryFilterOpen(false);
-                              setPage(1);
-                            }}
-                            style={{
-                              width: "100%",
-                              padding: "7px 10px",
-                              textAlign: "left",
-                              fontSize: 12.5,
-                              border: "none",
-                              background: selectedCategory === cat.name ? c.accentSoft : "transparent",
-                              color: selectedCategory === cat.name ? c.accent : c.text,
-                              fontWeight: selectedCategory === cat.name ? 600 : 400,
-                              cursor: "pointer",
-                              borderRadius: 4,
-                            }}
-                          >
-                            {cat.name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
+              <ArrowLeft size={14} /> Back to Items
+            </button>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h1 style={{ fontSize: 18, fontWeight: 700, color: c.text, margin: 0 }}>
+                  {viewingItem.itemName}
+                </h1>
+                <span style={{ fontSize: 13, color: c.textMuted, fontFamily: "monospace" }}>
+                  {viewingItem.sku}
+                </span>
               </div>
-
-              {/* Supplier Filter Dropdown — hidden for Sales (no supplier data) */}
-              {!isSales && (
-                <div style={{ position: "relative" }}>
-                  <button
-                    onClick={() => {
-                      setSupplierFilterOpen(!supplierFilterOpen);
-                      setCategoryFilterOpen(false);
-                      setSuppSearch("");
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "6px 12px",
-                      borderRadius: 8,
-                      border: `1px solid ${selectedSupplier ? c.accent : c.border}`,
-                      background: selectedSupplier ? c.accentSoft : c.surface,
-                      color: selectedSupplier ? c.accent : c.text,
-                      fontSize: 12.5,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    <Filter size={13} />
-                    <span>
-                      {selectedSupplier ? `Supplier: ${selectedSupplier.substring(0, 10)}${selectedSupplier.length > 10 ? "..." : ""}` : "All Suppliers"}
-                    </span>
-                    <ChevronDown size={13} />
-                  </button>
-
-                  {supplierFilterOpen && (
-                    <>
-                      <div
-                        onClick={() => setSupplierFilterOpen(false)}
-                        style={{
-                          position: "fixed",
-                          inset: 0,
-                          zIndex: 100,
-                        }}
-                      />
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "calc(100% + 6px)",
-                          right: 0,
-                          width: 220,
-                          background: c.surface,
-                          border: `1px solid ${c.border}`,
-                          borderRadius: 10,
-                          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                          zIndex: 101,
-                          padding: 6,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 6,
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "6px 8px",
-                            borderRadius: 6,
-                            border: `1px solid ${c.border}`,
-                            background: c.inputBg,
-                          }}
-                        >
-                          <Search size={12} color={c.textFaint} />
-                          <input
-                            value={suppSearch}
-                            onChange={(e) => setSuppSearch(e.target.value)}
-                            placeholder="Search suppliers..."
-                            style={{
-                              border: "none",
-                              outline: "none",
-                              background: "transparent",
-                              color: c.text,
-                              fontSize: 12,
-                              width: "100%",
-                              fontFamily: "inherit",
-                            }}
-                          />
-                        </div>
-                        <div style={{ maxHeight: 180, overflowY: "auto" }}>
-                          <button
-                            onClick={() => {
-                              setSelectedSupplier(null);
-                              setSupplierFilterOpen(false);
-                              setPage(1);
-                            }}
-                            style={{
-                              width: "100%",
-                              padding: "7px 10px",
-                              textAlign: "left",
-                              fontSize: 12.5,
-                              border: "none",
-                              background: !selectedSupplier ? c.accentSoft : "transparent",
-                              color: !selectedSupplier ? c.accent : c.text,
-                              fontWeight: !selectedSupplier ? 600 : 400,
-                              cursor: "pointer",
-                              borderRadius: 4,
-                            }}
-                          >
-                            All Suppliers
-                          </button>
-                          {filteredSuppliersForDropdown.map((supp) => (
-                            <button
-                              key={supp.id}
-                              onClick={() => {
-                                setSelectedSupplier(supp.supplierName);
-                                setSupplierFilterOpen(false);
-                                setPage(1);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "7px 10px",
-                                textAlign: "left",
-                                fontSize: 12.5,
-                                border: "none",
-                                background: selectedSupplier === supp.supplierName ? c.accentSoft : "transparent",
-                                color: selectedSupplier === supp.supplierName ? c.accent : c.text,
-                                fontWeight: selectedSupplier === supp.supplierName ? 600 : 400,
-                                cursor: "pointer",
-                                borderRadius: 4,
-                              }}
-                            >
-                              {supp.supplierName}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Text Search Bar */}
-              <SearchBar
-                value={itemSearch}
-                onChange={(val) => {
-                  setItemSearch(val);
-                  setPage(1);
-                }}
-                placeholder="Search items..."
-                c={c}
-                maxWidth={220}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+                <span style={{ fontSize: 12.5, color: c.textMuted }}>
+                  Category: <strong style={{ color: c.text }}>{viewingItem.category}</strong>
+                </span>
+                <span style={{ fontSize: 12.5, color: c.textFaint }}>•</span>
+                <HealthIndicator status={viewingItem.healthStatus} />
+                <span style={{ fontSize: 12.5, color: c.textFaint }}>•</span>
+                <span style={{ fontSize: 12.5, color: viewingItem.active ? "#2E7D32" : c.textFaint }}>
+                  {viewingItem.active ? "● Active" : "○ Inactive"}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* ---------------------------------------------------------------------- */}
-          {/* Data Table                                                            */}
-          {/* ---------------------------------------------------------------------- */}
-          {/* Table */}
-          <div style={{ overflowX: "auto", flex: 1 }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 13,
-                minWidth: 700,
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    color: c.textFaint,
-                    textAlign: "left",
-                    background: c.surfaceMuted,
-                  }}
-                >
-                  <th
-                    style={{
-                      width: 48,
-                      padding: "10px 20px",
-                      fontWeight: 500,
-                      fontSize: 11.5,
-                    }}
-                  />
-                  {[
-                    "SKU",
-                    "Item name",
-                    "Category",
-                    "Supplier",
-                    "Stock Qty",
-                    "Status",
-                    ...(readOnly ? [] : ["Actions"]),
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: "10px 20px",
-                        fontWeight: 500,
-                        fontSize: 11.5,
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pageItems.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      style={{
-                        padding: "32px 20px",
-                        textAlign: "center",
-                        color: c.textFaint,
-                      }}
-                    >
-                      No items found matching filters.
-                    </td>
-                  </tr>
-                ) : (
-                  pageItems.map((item) => {
-                    const isSelected = item.id === selectedItem?.id;
-                    return (
-                      <tr
-                        key={item.id}
-                        onClick={() => {
-                          setSelectedItem(item);
-                          setIsEditing(false);
-                        }}
-                        style={{
-                          borderTop: `1px solid ${c.border}`,
-                          background: isSelected ? c.accentSoft : "transparent",
-                          cursor: "pointer",
-                          transition: "background 0.1s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isSelected)
-                            e.currentTarget.style.background = c.surfaceMuted;
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isSelected)
-                            e.currentTarget.style.background = "transparent";
-                        }}
-                      >
-                        <td
-                          style={{ padding: "11px 20px" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Cb
-                            checked={selected.includes(item.id)}
-                            onChange={(v) => toggleOne(item.id, v)}
-                            c={c}
-                          />
-                        </td>
-                        <td style={{ padding: "11px 20px", color: c.textMuted, fontFamily: "monospace" }}>
-                          {item.sku}
-                        </td>
-                        <td style={{ padding: "11px 20px", fontWeight: 600 }}>
-                          {item.itemName}
-                        </td>
-                        <td style={{ padding: "11px 20px", color: c.textMuted }}>
-                          {item.category}
-                        </td>
-                        <td style={{ padding: "11px 20px" }}>
-                          {!item.supplier ? (
-                            <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
-                              No Access
-                            </span>
-                          ) : (
-                            <span style={{ color: c.textMuted }}>{item.supplier}</span>
-                          )}
-                        </td>
-                        <td
-                          style={{
-                            padding: "11px 20px",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {item.quantity} {item.unit}
-                        </td>
-                        <td style={{ padding: "11px 20px" }}>
-                          <StatusBadge active={item.active} c={c} />
-                        </td>
-                        <td
-                          style={{ padding: "11px 20px" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {!readOnly && (
-                            <div style={{ display: "flex", gap: 6 }}>
-                              <button
-                                onClick={() => {
-                                  setSelectedItem(item);
-                                  setIsEditing(true);
-                                }}
-                                title="Edit item"
-                                style={{
-                                  width: 28,
-                                  height: 28,
-                                  borderRadius: 7,
-                                  border: `1px solid ${c.border}`,
-                                  background: c.surface,
-                                  color: c.textMuted,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                <Pencil size={13} />
-                              </button>
-                              <button
-                                onClick={() => setItemToDelete(item)}
-                                title="Delete item"
-                                style={{
-                                  width: 28,
-                                  height: 28,
-                                  borderRadius: 7,
-                                  border: `1px solid ${c.border}`,
-                                  background: c.surface,
-                                  color: c.danger,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+          {!readOnly && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={handleToggleItemActive}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 14px",
+                  borderRadius: 8,
+                  border: `1px solid ${viewingItem.active ? c.border : "#BBF7D0"}`,
+                  background: viewingItem.active ? c.surface : "#F0FDF4",
+                  color: viewingItem.active ? c.textMuted : "#16A34A",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <span>{viewingItem.active ? "Deactivate Item" : "Activate Item"}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditForm(viewingItem);
+                  setEditError("");
+                  setIsEditingItem(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 14px",
+                  borderRadius: 8,
+                  border: `1px solid ${c.border}`,
+                  background: c.surface,
+                  color: c.text,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <Pencil size={13} /> Edit Item
+              </button>
+              <button
+                onClick={() => {
+                  setItemToDelete(viewingItem);
+                  setDeleteConfirmOpen(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 14px",
+                  borderRadius: 8,
+                  border: `1px solid #F8D7DA`,
+                  background: "#FDF2F2",
+                  color: "#DC2626",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <Trash2 size={13} /> Delete
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Key Metrics Overview Cards */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 12,
+          }}
+        >
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 12, color: c.textMuted }}>Current In Stock</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              {viewingItem.quantity.toLocaleString()}{" "}
+              <span style={{ fontSize: 13, fontWeight: 400, color: c.textMuted }}>{viewingItem.unit}</span>
+            </div>
           </div>
 
-          {/* Pagination */}
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            totalCount={totalCount}
-            pageSize={PAGE_SIZE}
-            itemLabel="items"
-            onPageChange={setPage}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 12, color: c.textMuted }}>Default Cost Price</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              {viewingItem.costPrice !== null && viewingItem.costPrice !== undefined ? `$${Number(viewingItem.costPrice).toFixed(2)}` : "—"}
+            </div>
+          </div>
+
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 12, color: c.textMuted }}>Default Selling Price</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              ${Number(viewingItem.sellingPrice).toFixed(2)}
+            </div>
+          </div>
+
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 12, color: c.textMuted }}>Target Margin</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: marginPct !== null ? "#2E7D32" : c.text, marginTop: 4 }}>
+              {marginPct !== null ? `${marginPct}%` : "—"}
+            </div>
+          </div>
+
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 12, color: c.textMuted }}>Reorder Threshold</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              {viewingItem.reorderLevel}{" "}
+              <span style={{ fontSize: 12, fontWeight: 400, color: c.textMuted }}>(Order: {viewingItem.reorderQuantity})</span>
+            </div>
+          </div>
+        </div>
+
+        {viewingItem.description && (
+          <div
+            style={{
+              background: c.surfaceMuted,
+              border: `1px solid ${c.border}`,
+              borderRadius: 10,
+              padding: "12px 16px",
+              fontSize: 13,
+              color: c.textMuted,
+            }}
+          >
+            <strong style={{ color: c.text }}>Description: </strong>
+            {viewingItem.description}
+          </div>
+        )}
+
+        {/* Section 1: Linked Suppliers & Fixed Agreed Pricing */}
+        <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "18px 20px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div>
+              <h2 style={{ fontSize: 15, fontWeight: 600, color: c.text, margin: 0 }}>
+                Suppliers & Agreed Purchase Pricing
+              </h2>
+              <p style={{ fontSize: 12, color: c.textMuted, margin: "3px 0 0 0" }}>
+                Suppliers authorized to provide this item and their locked PO unit price.
+              </p>
+            </div>
+            {!readOnly && unlinkedSuppliers.length > 0 && !isLinkingSupplier && (
+              <button
+                onClick={() => {
+                  setNewSupplierId(unlinkedSuppliers[0]?.id || "");
+                  setNewAgreedPrice(viewingItem.costPrice ? String(viewingItem.costPrice) : "");
+                  setNewIsPrimary(itemSuppliers.length === 0);
+                  setIsLinkingSupplier(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  borderRadius: 7,
+                  border: `1px solid ${c.border}`,
+                  background: c.surface,
+                  color: c.text,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <Plus size={13} /> Link Supplier
+              </button>
+            )}
+          </div>
+
+          {/* Add Supplier Form */}
+          {isLinkingSupplier && (
+            <div
+              style={{
+                background: c.surfaceMuted,
+                border: `1px solid ${c.border}`,
+                borderRadius: 10,
+                padding: 14,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 10 }}>
+                Link Sourcing Supplier
+              </div>
+              {supplierFormError && (
+                <div style={{ padding: "7px 10px", background: c.dangerSoft, color: c.danger, borderRadius: 6, fontSize: 12, marginBottom: 10 }}>
+                  {supplierFormError}
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11.5, color: c.textMuted, display: "block", marginBottom: 4 }}>
+                    Supplier *
+                  </label>
+                  <select style={inp(c)} value={newSupplierId} onChange={(e) => setNewSupplierId(e.target.value)}>
+                    {unlinkedSuppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.supplierName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11.5, color: c.textMuted, display: "block", marginBottom: 4 }}>
+                    Agreed Purchase Price ($) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    style={inp(c)}
+                    value={newAgreedPrice}
+                    onChange={(e) => setNewAgreedPrice(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11.5, color: c.textMuted, display: "block", marginBottom: 4 }}>
+                    Supplier SKU (Optional)
+                  </label>
+                  <input
+                    style={inp(c)}
+                    value={newSupplierSku}
+                    onChange={(e) => setNewSupplierSku(e.target.value)}
+                    placeholder="e.g. SUP-SKU-99"
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, cursor: "pointer", color: c.text }}>
+                  <input type="checkbox" checked={newIsPrimary} onChange={(e) => setNewIsPrimary(e.target.checked)} />
+                  Set as Primary Supplier
+                </label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => setIsLinkingSupplier(false)}
+                    style={{ padding: "6px 12px", borderRadius: 6, border: `1px solid ${c.border}`, background: c.surface, color: c.text, fontSize: 12, cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleLinkSupplier}
+                    style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: c.accent, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Save Link
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Suppliers Table */}
+          {loadingDetails ? (
+            <div style={{ padding: "20px 0", textAlign: "center", color: c.textMuted, fontSize: 13 }}>
+              Loading suppliers...
+            </div>
+          ) : itemSuppliers.length === 0 ? (
+            <div style={{ padding: "24px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
+              No suppliers linked yet. Link a supplier above to enable purchase orders for this item.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ color: c.textFaint, textAlign: "left", borderBottom: `1px solid ${c.border}` }}>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Supplier</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Primary</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Agreed Price</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Supplier SKU</th>
+                    {!readOnly && <th style={{ padding: "8px 12px", fontWeight: 500, textAlign: "right" }}>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {itemSuppliers.map((link) => (
+                    <tr key={link.supplier_id} style={{ borderBottom: `1px solid ${c.border}` }}>
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: c.text }}>
+                        {link.supplier_name}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {link.is_primary ? (
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: "#2E7D32", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            ● Primary
+                          </span>
+                        ) : !readOnly ? (
+                          <button
+                            onClick={() => handleSetPrimary(link.supplier_id)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: c.textMuted,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              padding: 0,
+                              textDecoration: "underline",
+                            }}
+                          >
+                            Set as primary
+                          </button>
+                        ) : (
+                          <span style={{ color: c.textFaint, fontSize: 12 }}>Secondary</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {editingSupplierId === link.supplier_id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              value={editAgreedPrice}
+                              onChange={(e) => setEditAgreedPrice(e.target.value)}
+                              style={{ width: 80, padding: "4px 8px", borderRadius: 6, border: `1px solid ${c.border}`, fontSize: 12.5 }}
+                            />
+                            <button
+                              onClick={() => handleSaveAgreedPrice(link.supplier_id)}
+                              style={{ background: c.accent, color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 11, cursor: "pointer" }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingSupplierId(null)}
+                              style={{ background: "none", border: "none", color: c.textMuted, fontSize: 11, cursor: "pointer" }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ fontWeight: 600, color: c.text }}>
+                            ${Number(link.agreed_price).toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 12px", color: c.textMuted, fontFamily: "monospace", fontSize: 12 }}>
+                        {link.supplier_sku || "—"}
+                      </td>
+                      {!readOnly && (
+                        <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                            {editingSupplierId !== link.supplier_id && (
+                              <button
+                                onClick={() => {
+                                  setEditingSupplierId(link.supplier_id);
+                                  setEditAgreedPrice(String(link.agreed_price));
+                                }}
+                                style={{ background: "none", border: "none", color: c.textMuted, cursor: "pointer", padding: 2 }}
+                                title="Edit Agreed Price"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleUnlinkSupplier(link.supplier_id)}
+                              style={{ background: "none", border: "none", color: c.danger, cursor: "pointer", padding: 2 }}
+                              title="Unlink Supplier"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Section 2: Active Batches with Batch Cost & Batch Selling Price */}
+        <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "18px 20px" }}>
+          <div style={{ marginBottom: 14 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: c.text, margin: 0 }}>
+              Active Stock Batches & Batch Pricing
+            </h2>
+            <p style={{ fontSize: 12, color: c.textMuted, margin: "3px 0 0 0" }}>
+              Granular inventory tracking per supplier lot with custom batch purchase and selling prices.
+            </p>
+          </div>
+
+          {loadingDetails ? (
+            <div style={{ padding: "20px 0", textAlign: "center", color: c.textMuted, fontSize: 13 }}>
+              Loading batches...
+            </div>
+          ) : itemBatches.length === 0 ? (
+            <div style={{ padding: "24px 0", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
+              No active stock batches found. Receive purchase orders to generate new batches.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ color: c.textFaint, textAlign: "left", borderBottom: `1px solid ${c.border}` }}>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Batch #</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Supplier</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Quantity</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Expiry Date</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Purchase Cost</th>
+                    <th style={{ padding: "8px 12px", fontWeight: 500 }}>Batch Selling Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itemBatches.map((b) => (
+                    <tr key={b.batch_id} style={{ borderBottom: `1px solid ${c.border}` }}>
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: c.text, fontFamily: "monospace" }}>
+                        {b.batch_number}
+                      </td>
+                      <td style={{ padding: "10px 12px", color: c.text }}>
+                        {b.supplier_name || "—"}
+                      </td>
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: b.current_quantity <= 0 ? "#DC2626" : c.text }}>
+                        {b.current_quantity} <span style={{ fontSize: 11.5, color: c.textMuted }}>/ {b.initial_quantity}</span>
+                      </td>
+                      <td style={{ padding: "10px 12px", color: c.textMuted }}>
+                        {b.expiry_date ? new Date(b.expiry_date).toLocaleDateString() : "No Expiry"}
+                      </td>
+                      <td style={{ padding: "10px 12px", color: c.textMuted }}>
+                        ${Number(b.purchase_price).toFixed(2)}
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <span style={{ fontWeight: 600, color: "#2E7D32" }}>
+                          ${Number(b.selling_price ?? viewingItem.sellingPrice).toFixed(2)}
+                        </span>
+                        {b.selling_price && Number(b.selling_price) !== Number(viewingItem.sellingPrice) && (
+                          <span style={{ fontSize: 10.5, color: "#D97706", marginLeft: 6 }}>
+                            (Override)
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Edit General Item Modal */}
+        {isEditingItem && (
+          <Modal title="Edit Item Details" onClose={() => setIsEditingItem(false)} c={c} width={520}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {editError && (
+                <div style={{ padding: "8px 12px", background: c.dangerSoft, color: c.danger, borderRadius: 8, fontSize: 12.5 }}>
+                  {editError}
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Item Name *" c={c}>
+                  <input style={inp(c)} value={editForm.itemName || ""} onChange={(e) => setEditForm({ ...editForm, itemName: e.target.value })} />
+                </Field>
+                <Field label="SKU *" c={c}>
+                  <input style={inp(c)} value={editForm.sku || ""} onChange={(e) => setEditForm({ ...editForm, sku: e.target.value })} />
+                </Field>
+              </div>
+
+              <Field label="Description" c={c}>
+                <textarea rows={2} style={{ ...inp(c), resize: "vertical" }} value={editForm.description || ""} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+              </Field>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Category" c={c}>
+                  <select style={inp(c)} value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}>
+                    {categoryList.map((cat) => (
+                      <option key={cat.id} value={cat.name}>{cat.name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Unit" c={c}>
+                  <select style={inp(c)} value={editForm.unit} onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })}>
+                    {units.map((u) => (
+                      <option key={u.unit_id} value={u.unit_symbol}>{u.unit_name} ({u.unit_symbol})</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Cost Price ($)" c={c}>
+                  <input type="number" min="0.01" step="0.01" style={inp(c)} value={editForm.costPrice || ""} onChange={(e) => setEditForm({ ...editForm, costPrice: e.target.value })} />
+                </Field>
+                <Field label="Default Selling Price ($)" c={c}>
+                  <input type="number" min="0.01" step="0.01" style={inp(c)} value={editForm.sellingPrice || ""} onChange={(e) => setEditForm({ ...editForm, sellingPrice: e.target.value })} />
+                </Field>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Reorder Alert Level" c={c}>
+                  <input type="number" min="0" style={inp(c)} value={editForm.reorderLevel ?? ""} onChange={(e) => setEditForm({ ...editForm, reorderLevel: e.target.value })} />
+                </Field>
+                <Field label="Default Reorder Qty" c={c}>
+                  <input type="number" min="0" style={inp(c)} value={editForm.reorderQuantity ?? ""} onChange={(e) => setEditForm({ ...editForm, reorderQuantity: e.target.value })} />
+                </Field>
+              </div>
+
+              <Field label="Item Status" c={c}>
+                <select
+                  style={inp(c)}
+                  value={editForm.active ? "true" : "false"}
+                  onChange={(e) => setEditForm({ ...editForm, active: e.target.value === "true" })}
+                >
+                  <option value="true">● Active (Enabled in catalog & stock movements)</option>
+                  <option value="false">○ Inactive (Disabled from new sales & orders)</option>
+                </select>
+              </Field>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                <button onClick={() => setIsEditingItem(false)} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${c.border}`, background: c.surface, color: c.text, fontSize: 13, cursor: "pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={handleSaveItemEdit} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: c.accent, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {deleteConfirmOpen && itemToDelete && (
+          <ConfirmDeleteModal
+            title="Delete Item"
+            message={`Are you sure you want to delete ${itemToDelete.itemName} (${itemToDelete.sku})? This action cannot be undone.`}
+            onConfirm={handleDeleteItem}
+            onClose={() => {
+              setDeleteConfirmOpen(false);
+              setItemToDelete(null);
+            }}
+            c={c}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MAIN INVENTORY TABLE VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Search & Filter Toolbar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240, maxWidth: 360 }}>
+          <SearchBar
+            value={itemSearch}
+            onChange={(val) => {
+              setItemSearch(val);
+              setPage(1);
+            }}
+            placeholder="Search item name, SKU..."
             c={c}
           />
         </div>
 
-        {/* ── Item Detail Slide Panel ── */}
-        {selectedItem && (
-          <>
-            {isMobile && (
-              <div
-                onClick={() => setSelectedItem(null)}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {selected.length > 0 && !readOnly && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12.5, color: c.textMuted }}>{selected.length} selected</span>
+              <button
+                onClick={() => setSelected([])}
                 style={{
-                  position: "fixed",
-                  inset: 0,
-                  background: "rgba(0,0,0,0.4)",
-                  zIndex: 290,
+                  fontSize: 12.5,
+                  color: c.textMuted,
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontWeight: 500,
+                  fontFamily: "inherit",
                 }}
-              />
-            )}
-            <div
+              >
+                Deselect all
+              </button>
+              <button
+                onClick={() => setBatchDeleteOpen(true)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: `1px solid ${c.dangerSoft || "#FEE2E2"}`,
+                  background: c.dangerSoft || "#FEF2F2",
+                  color: c.danger || "#DC2626",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <Trash2 size={13} />
+                <span>Delete Selected ({selected.length})</span>
+              </button>
+            </div>
+          )}
+
+          {/* Category Filter */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setCategoryFilterOpen(!categoryFilterOpen);
+                setHealthFilterOpen(false);
+              }}
               style={{
-                position: isMobile ? "fixed" : "relative",
-                top: 0,
-                right: 0,
-                bottom: 0,
-                width: isMobile ? "100%" : "380px",
-                height: "100%",
-                background: c.surface,
-                border: isMobile ? "none" : `1px solid ${c.border}`,
-                borderLeft: `1px solid ${c.border}`,
-                boxShadow: isMobile ? "-4px 0 20px rgba(0,0,0,0.2)" : "none",
-                borderRadius: isMobile ? "0" : "14px",
-                zIndex: 300,
                 display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${selectedCategory ? c.accent : c.border}`,
+                background: selectedCategory ? c.accentSoft : c.surface,
+                color: selectedCategory ? c.accent : c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
               }}
             >
+              <Filter size={13} />
+              {selectedCategory || "All Categories"}
+              <ChevronDown size={13} />
+            </button>
+
+            {categoryFilterOpen && (
               <div
                 style={{
-                  padding: "18px 20px",
-                  borderBottom: `1px solid ${c.border}`,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexShrink: 0,
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 4,
+                  width: 200,
+                  background: c.surface,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                  zIndex: 20,
+                  padding: 4,
                 }}
               >
-                <h3 style={{ fontSize: 15, fontWeight: 600 }}>
-                  {isEditing ? "Edit Item Details" : "Item Details"}
-                </h3>
-                <button
-                  onClick={() => setSelectedItem(null)}
+                <div
+                  onClick={() => {
+                    setSelectedCategory(null);
+                    setCategoryFilterOpen(false);
+                    setPage(1);
+                  }}
                   style={{
-                    border: "none",
-                    background: "none",
+                    padding: "7px 10px",
+                    borderRadius: 6,
+                    fontSize: 12.5,
                     cursor: "pointer",
-                    color: c.textMuted,
-                    display: "flex",
-                    alignItems: "center",
+                    background: !selectedCategory ? c.surfaceMuted : "transparent",
+                    color: !selectedCategory ? c.accent : c.text,
                   }}
                 >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-                {editError && (
+                  All Categories
+                </div>
+                {categoryList.map((cat) => (
                   <div
+                    key={cat.id}
+                    onClick={() => {
+                      setSelectedCategory(cat.name);
+                      setCategoryFilterOpen(false);
+                      setPage(1);
+                    }}
                     style={{
-                      padding: "8px 12px",
-                      background: c.dangerSoft,
-                      color: c.danger,
-                      borderRadius: 8,
+                      padding: "7px 10px",
+                      borderRadius: 6,
                       fontSize: 12.5,
-                      fontWeight: 500,
-                      marginBottom: 16,
+                      cursor: "pointer",
+                      background: selectedCategory === cat.name ? c.surfaceMuted : "transparent",
+                      color: selectedCategory === cat.name ? c.accent : c.text,
                     }}
                   >
-                    {editError}
+                    {cat.name}
                   </div>
-                )}
-
-                {!isEditing ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                        paddingBottom: 16,
-                        borderBottom: `1px solid ${c.border}`,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 50,
-                          height: 50,
-                          borderRadius: 12,
-                          background: c.accentSoft,
-                          color: c.accent,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Package size={28} />
-                      </div>
-                      <div>
-                        <h4 style={{ fontSize: 15, fontWeight: 600, marginBottom: 3 }}>
-                          {selectedItem.itemName}
-                        </h4>
-                        <p style={{ fontSize: 12, color: c.textFaint, fontFamily: "monospace" }}>
-                          SKU: {selectedItem.sku}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <Field label="Description" c={c}>
-                        <div style={{ fontSize: 13, color: c.text, lineHeight: 1.5 }}>
-                          {selectedItem.description || "No description provided."}
-                        </div>
-                      </Field>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <Field label="Category" c={c}>
-                          <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {selectedItem.category}
-                          </div>
-                        </Field>
-                        <Field label="Supplier" c={c}>
-                          <div style={{ fontSize: 13, fontWeight: 500 }}>
-                            {!selectedItem.supplier ? (
-                              <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
-                                No Access
-                              </span>
-                            ) : selectedItem.supplier}
-                          </div>
-                        </Field>
-                      </div>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <Field label="Quantity in Stock" c={c}>
-                          <div
-                            style={{
-                              fontSize: 14,
-                              fontWeight: 700,
-                              color: selectedItem.quantity <= selectedItem.reorderLevel ? c.danger : c.text,
-                            }}
-                          >
-                            {selectedItem.quantity} {selectedItem.unit}
-                          </div>
-                        </Field>
-                        <Field label="Status" c={c}>
-                          <StatusBadge active={selectedItem.active} c={c} />
-                        </Field>
-                      </div>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <Field label="Cost Price" c={c}>
-                          <div style={{ fontSize: 13.5, fontWeight: 600 }}>
-                            {selectedItem.costPrice == null ? (
-                              <span style={{ fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, background: c.surfaceMuted, color: c.textFaint }}>
-                                No Access
-                              </span>
-                            ) : (
-                              `Rs ${selectedItem.costPrice.toLocaleString()}`
-                            )}
-                          </div>
-                        </Field>
-                        <Field label="Selling Price" c={c}>
-                          <div style={{ fontSize: 13.5, fontWeight: 600, color: c.accent }}>
-                            Rs {selectedItem.sellingPrice.toLocaleString()}
-                          </div>
-                        </Field>
-                      </div>
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <Field label="Reorder Level" c={c}>
-                          <div style={{ fontSize: 13, color: c.textMuted }}>
-                            {selectedItem.reorderLevel} {selectedItem.unit}
-                          </div>
-                        </Field>
-                        <Field label="Reorder Quantity" c={c}>
-                          <div style={{ fontSize: 13, color: c.textMuted }}>
-                            {selectedItem.reorderQuantity} {selectedItem.unit}
-                          </div>
-                        </Field>
-                      </div>
-
-                      <div
-                        style={{
-                          height: 1,
-                          background: c.border,
-                          margin: "8px 0",
-                        }}
-                      />
-
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                        <Field label="Created At" c={c}>
-                          <div style={{ fontSize: 12, color: c.textFaint }}>
-                            {selectedItem.createdAt ? new Date(selectedItem.createdAt).toLocaleString() : "—"}
-                          </div>
-                        </Field>
-                        <Field label="Updated At" c={c}>
-                          <div style={{ fontSize: 12, color: c.textFaint }}>
-                            {selectedItem.updatedAt ? new Date(selectedItem.updatedAt).toLocaleString() : "—"}
-                          </div>
-                        </Field>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* EDIT MODE */
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                    <Field label="Item Name" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.itemName || ""}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, itemName: e.target.value })
-                        }
-                      />
-                    </Field>
-                    <Field label="SKU" c={c}>
-                      <input
-                        style={inp(c)}
-                        value={editForm.sku || ""}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, sku: e.target.value })
-                        }
-                      />
-                    </Field>
-                    <Field label="Description" c={c}>
-                      <textarea
-                        style={{ ...inp(c), height: 60, resize: "vertical" }}
-                        value={editForm.description || ""}
-                        onChange={(e) =>
-                          setEditForm({ ...editForm, description: e.target.value })
-                        }
-                      />
-                    </Field>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <Field label="Category" c={c}>
-                        <select
-                          style={inp(c)}
-                          value={editForm.category || ""}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, category: e.target.value })
-                          }
-                        >
-                          {categoryList.map((cat) => (
-                            <option key={cat.id} value={cat.name}>
-                              {cat.name}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="Supplier" c={c}>
-                        <select
-                          style={inp(c)}
-                          value={editForm.supplier || ""}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, supplier: e.target.value })
-                          }
-                        >
-                          {supplierList.map((supp) => (
-                            <option key={supp.id} value={supp.supplierName}>
-                              {supp.supplierName}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <Field label="Quantity" c={c}>
-                        <input
-                          type="number"
-                          style={inp(c)}
-                          value={editForm.quantity || 0}
-                          disabled
-                        />
-                      </Field>
-                      <Field label="Unit" c={c}>
-                        <input
-                          style={inp(c)}
-                          value={editForm.unit || ""}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, unit: e.target.value })
-                          }
-                        />
-                      </Field>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <Field label="Cost Price" c={c}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          style={inp(c)}
-                          value={editForm.costPrice || 0}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              costPrice: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </Field>
-                      <Field label="Selling Price" c={c}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          style={inp(c)}
-                          value={editForm.sellingPrice || 0}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              sellingPrice: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </Field>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <Field label="Reorder Level" c={c}>
-                        <input
-                          type="number"
-                          style={inp(c)}
-                          value={editForm.reorderLevel || 0}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              reorderLevel: parseInt(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </Field>
-                      <Field label="Reorder Quantity" c={c}>
-                        <input
-                          type="number"
-                          style={inp(c)}
-                          value={editForm.reorderQuantity || 0}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              reorderQuantity: parseInt(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </Field>
-                    </div>
-
-                    <Field label="Status" c={c}>
-                      <select
-                        style={inp(c)}
-                        value={editForm.active ? "active" : "inactive"}
-                        onChange={(e) =>
-                          setEditForm({
-                            ...editForm,
-                            active: e.target.value === "active",
-                          })
-                        }
-                      >
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                      </select>
-                    </Field>
-                  </div>
-                )}
+                ))}
               </div>
+            )}
+          </div>
 
-              {/* Panel Footer */}
+          {/* Stock Health Filter */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setHealthFilterOpen(!healthFilterOpen);
+                setCategoryFilterOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${selectedHealth ? c.accent : c.border}`,
+                background: selectedHealth ? c.accentSoft : c.surface,
+                color: selectedHealth ? c.accent : c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {selectedHealth ? `Health: ${selectedHealth}` : "All Stock Health"}
+              <ChevronDown size={13} />
+            </button>
+
+            {healthFilterOpen && (
               <div
                 style={{
-                  padding: "14px 20px",
-                  borderTop: `1px solid ${c.border}`,
-                  background: c.surfaceMuted,
-                  display: "flex",
-                  gap: 8,
-                  justifyContent: "flex-end",
-                  flexShrink: 0,
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 4,
+                  width: 170,
+                  background: c.surface,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                  zIndex: 20,
+                  padding: 4,
                 }}
               >
-                {!isEditing ? (
-                  <>
-                    {!readOnly && (
-                      <button
-                        onClick={() => setIsEditing(true)}
-                        style={{
-                          flex: 1,
-                          padding: "9px",
-                          borderRadius: 8,
-                          border: `1px solid ${c.border}`,
-                          background: c.surface,
-                          color: c.text,
-                          fontSize: 13,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <Pencil size={13} /> Edit Details
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setSelectedItem(null)}
-                      style={{
-                        padding: "9px 16px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: c.accent,
-                        color: "#fff",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Close
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setIsEditing(false)}
-                      style={{
-                        padding: "9px 14px",
-                        borderRadius: 8,
-                        border: `1px solid ${c.border}`,
-                        background: c.surface,
-                        color: c.text,
-                        fontSize: 13,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => handleSaveEdit(editForm)}
-                      style={{
-                        padding: "9px 16px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: c.accent,
-                        color: "#fff",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Save Changes
-                    </button>
-                  </>
-                )}
+                {[
+                  { label: "All Health", val: null },
+                  { label: "Healthy", val: "HEALTHY" },
+                  { label: "Low Stock", val: "LOW_STOCK" },
+                  { label: "Critical", val: "CRITICAL" },
+                ].map((opt) => (
+                  <div
+                    key={opt.label}
+                    onClick={() => {
+                      setSelectedHealth(opt.val);
+                      setHealthFilterOpen(false);
+                      setPage(1);
+                    }}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      background: selectedHealth === opt.val ? c.surfaceMuted : "transparent",
+                      color: selectedHealth === opt.val ? c.accent : c.text,
+                    }}
+                  >
+                    {opt.label}
+                  </div>
+                ))}
               </div>
-            </div>
-          </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Table */}
+      <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ color: c.textFaint, textAlign: "left", background: c.surfaceMuted }}>
+                <th style={{ width: 38, padding: "10px 14px" }}>
+                  <Cb checked={allPageSelected} onChange={toggleAllPage} c={c} />
+                </th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Item Name & SKU</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Category</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>In Stock</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Stock Health</th>
+                {!isSales && <th style={{ padding: "10px 14px", fontWeight: 500 }}>Cost Price</th>}
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Selling Price</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loadingItems && itemList.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 32, textAlign: "center", color: c.textMuted }}>
+                    Loading inventory items...
+                  </td>
+                </tr>
+              ) : pageItems.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 32, textAlign: "center", color: c.textFaint }}>
+                    No items found matching your criteria.
+                  </td>
+                </tr>
+              ) : (
+                pageItems.map((item) => (
+                  <tr
+                    key={item.id}
+                    onClick={() => setViewingItem(item)}
+                    style={{
+                      borderTop: `1px solid ${c.border}`,
+                      cursor: "pointer",
+                      background: selected.includes(item.id) ? c.surfaceMuted : "transparent",
+                    }}
+                  >
+                    <td style={{ padding: "12px 14px" }} onClick={(e) => e.stopPropagation()}>
+                      <Cb checked={selected.includes(item.id)} onChange={(chk) => toggleOne(item.id, chk)} c={c} />
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <div style={{ fontWeight: 600, color: c.text }}>{item.itemName}</div>
+                      <div style={{ fontSize: 11.5, color: c.textMuted, fontFamily: "monospace", marginTop: 2 }}>
+                        {item.sku}
+                      </div>
+                    </td>
+                    <td style={{ padding: "12px 14px", color: c.textMuted }}>
+                      {item.category}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <span style={{ fontWeight: 600, color: item.quantity <= 0 ? "#DC2626" : c.text }}>
+                        {item.quantity.toLocaleString()}
+                      </span>{" "}
+                      <span style={{ fontSize: 11.5, color: c.textFaint }}>{item.unit}</span>
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <HealthIndicator status={item.healthStatus} />
+                    </td>
+                    {!isSales && (
+                      <td style={{ padding: "12px 14px", color: c.textMuted }}>
+                        {item.costPrice !== null && item.costPrice !== undefined ? `$${Number(item.costPrice).toFixed(2)}` : "—"}
+                      </td>
+                    )}
+                    <td style={{ padding: "12px 14px", fontWeight: 600, color: c.text }}>
+                      ${Number(item.sellingPrice).toFixed(2)}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <span style={{ fontSize: 12, color: item.active ? "#2E7D32" : c.textFaint }}>
+                        {item.active ? "● Active" : "○ Inactive"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {totalCount > PAGE_SIZE && (
+          <div style={{ borderTop: `1px solid ${c.border}` }}>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+              c={c}
+            />
+          </div>
         )}
       </div>
 
-      {/* Modals */}
+      {/* Create Modal */}
       {addItemOpen && (
         <CreateItemModal
           onClose={() => setAddItemOpen(false)}
-          onSave={handleCreateItem}
+          onSubmit={handleCreateItem}
           categoryList={categoryList}
-          supplierList={supplierList}
+          units={units}
           c={c}
         />
       )}
 
-      {itemToDelete && (
+      {/* Batch Delete Confirmation Modal */}
+      {batchDeleteOpen && (
         <ConfirmDeleteModal
-          title="Delete Item"
-          itemName={itemToDelete.itemName}
-          itemType="item"
-          message={`Delete ${itemToDelete.itemName} (${itemToDelete.sku})? This will remove the item details. This action cannot be undone.`}
-          onClose={() => setItemToDelete(null)}
-          onConfirm={handleDeleteConfirm}
+          title={`Delete ${selected.length} Selected Items`}
+          itemName={`${selected.length} items`}
+          itemType="items"
+          message={`Are you sure you want to permanently delete the ${selected.length} selected inventory item(s)? This action cannot be undone.`}
+          onClose={() => setBatchDeleteOpen(false)}
+          onConfirm={handleBatchDeleteItems}
+          loading={batchDeleting}
           c={c}
         />
       )}

@@ -55,43 +55,47 @@ function Cb({
   );
 }
 
-// ── Badges ─────────────────────────────────────────────────
+// ── Badges / Minimal Indicators ────────────────────────────
 function RoleBadge({ role, c }: { role: string; c: any }) {
-  const map: Record<string, { bg: string; fg: string }> = {
-    Admin: { bg: c.dangerSoft, fg: c.danger },
-    Manager: { bg: c.warnSoft, fg: c.warn },
-    Staff: { bg: c.accentSoft, fg: c.accent },
-    Auditor: { bg: c.surfaceMuted, fg: c.textMuted },
+  const map: Record<string, string> = {
+    Admin: "#DC2626",
+    Manager: "#D97706",
+    Staff: "#2563EB",
+    Sales: "#2563EB",
+    Auditor: "#7C3AED",
   };
-  const s = map[role] || map.Staff;
+  const color = map[role] || c.textMuted;
   return (
     <span
       style={{
-        fontSize: 11.5,
-        fontWeight: 600,
-        padding: "3px 9px",
-        borderRadius: 999,
-        background: s.bg,
-        color: s.fg,
+        fontSize: 12.5,
+        fontWeight: 500,
+        color,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
       }}
     >
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
       {role}
     </span>
   );
 }
 
 function StatusBadge({ active, c }: { active: boolean; c: any }) {
+  const color = active ? "#2E7D32" : c.textFaint;
   return (
     <span
       style={{
-        fontSize: 11.5,
-        fontWeight: 600,
-        padding: "3px 9px",
-        borderRadius: 999,
-        background: active ? c.accentSoft : c.surfaceMuted,
-        color: active ? c.accent : c.textFaint,
+        fontSize: 12.5,
+        fontWeight: 500,
+        color,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
       }}
     >
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
       {active ? "Active" : "Inactive"}
     </span>
   );
@@ -443,6 +447,8 @@ export default function UsersPage() {
   // Modals state
   const [addOpen, setAddOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   // Pagination states
   const [page, setPage] = useState(1);
@@ -737,6 +743,40 @@ export default function UsersPage() {
     }
   };
 
+  const handleBatchDeleteUsers = async () => {
+    if (selected.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      let successCount = 0;
+      const errors: string[] = [];
+      for (const id of selected) {
+        if (loggedInUser && loggedInUser.id === id) {
+          errors.push("Cannot delete your own logged-in account");
+          continue;
+        }
+        try {
+          await apiFetch(`/users/${id}`, { method: "DELETE" });
+          successCount++;
+        } catch (err: any) {
+          errors.push(err.message || `Failed to delete user`);
+        }
+      }
+      setSelected([]);
+      setBatchDeleteOpen(false);
+      if (selectedUser && selected.includes(selectedUser.id)) {
+        setSelectedUser(null);
+      }
+      loadUsersFromBackend();
+      if (errors.length > 0) {
+        alert(`Deleted ${successCount} user(s). Note: ${errors.join(", ")}`);
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to delete selected users.");
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
   const ROLES = ["Admin", "Manager", "Staff", "Auditor"];
 
@@ -801,20 +841,42 @@ export default function UsersPage() {
                 </span>
               </div>
               {selected.length > 0 && (
-                <button
-                  onClick={() => setSelected([])}
-                  style={{
-                    fontSize: 12.5,
-                    color: c.textMuted,
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontWeight: 500,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  Deselect all
-                </button>
+                <>
+                  <button
+                    onClick={() => setSelected([])}
+                    style={{
+                      fontSize: 12.5,
+                      color: c.textMuted,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontWeight: 500,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Deselect all
+                  </button>
+                  <button
+                    onClick={() => setBatchDeleteOpen(true)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "5px 12px",
+                      borderRadius: 7,
+                      border: `1px solid ${c.dangerSoft || "#FEE2E2"}`,
+                      background: c.dangerSoft || "#FEF2F2",
+                      color: c.danger || "#DC2626",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <Trash2 size={13} />
+                    <span>Delete Selected ({selected.length})</span>
+                  </button>
+                </>
               )}
               {/* Search bar */}
               <div
@@ -1561,6 +1623,19 @@ export default function UsersPage() {
           message={`Delete ${userToDelete.fullName}? This removes their access immediately and cannot be undone.`}
           onClose={() => setUserToDelete(null)}
           onConfirm={handleDeleteConfirm}
+          c={c}
+        />
+      )}
+
+      {batchDeleteOpen && (
+        <ConfirmDeleteModal
+          title={`Delete ${selected.length} Selected Users`}
+          itemName={`${selected.length} user accounts`}
+          itemType="users"
+          message={`Are you sure you want to delete ${selected.length} selected user account(s)? This action removes their access immediately and cannot be undone.`}
+          onClose={() => setBatchDeleteOpen(false)}
+          onConfirm={handleBatchDeleteUsers}
+          loading={batchDeleting}
           c={c}
         />
       )}

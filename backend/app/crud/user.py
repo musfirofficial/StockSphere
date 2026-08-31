@@ -64,6 +64,16 @@ async def get_all_users(db: AsyncSession) -> Sequence[User] | None:
     return result.scalars().all()
 
 
+async def get_active_admin_count(db: AsyncSession) -> int:
+    from app.models import UserRole
+    result = await db.execute(
+        select(func.count()).select_from(User).where(
+            (User.role == UserRole.ADMIN) & (User.is_active == True)
+        )
+    )
+    return result.scalar() or 0
+
+
 # ----------------------- CRUD for update existing user ----------------------- #
 async def update_user(db: AsyncSession, db_user: User, update_data: dict) -> User:
     for field, value in update_data.items():

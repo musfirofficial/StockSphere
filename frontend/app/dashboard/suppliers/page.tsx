@@ -277,6 +277,8 @@ export default function SuppliersPage() {
   // Modal open states
   const [addSupplierOpen, setAddSupplierOpen] = useState(false);
   const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   // Pagination states
   const [page, setPage] = useState(1);
@@ -455,6 +457,36 @@ export default function SuppliersPage() {
     }
   };
 
+  const handleBatchDeleteSuppliers = async () => {
+    if (selected.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      let successCount = 0;
+      const errors: string[] = [];
+      for (const id of selected) {
+        try {
+          await apiFetch(`/suppliers/${id}`, { method: "DELETE" });
+          successCount++;
+        } catch (err: any) {
+          errors.push(err.message || `Failed to delete supplier`);
+        }
+      }
+      setSelected([]);
+      setBatchDeleteOpen(false);
+      if (selectedSupplier && selected.includes(selectedSupplier.id)) {
+        setSelectedSupplier(null);
+      }
+      await refreshSuppliers();
+      if (errors.length > 0) {
+        alert(`Deleted ${successCount} supplier(s). Note: ${errors.join(", ")}`);
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to delete selected suppliers.");
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   const pageNums = Array.from({ length: totalPages }, (_, i) => i + 1);
 
   // ==========================================================================
@@ -517,20 +549,44 @@ export default function SuppliersPage() {
                 </span>
               </div>
               {selected.length > 0 && (
-                <button
-                  onClick={() => setSelected([])}
-                  style={{
-                    fontSize: 12.5,
-                    color: c.textMuted,
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    fontWeight: 500,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  Deselect all
-                </button>
+                <>
+                  <button
+                    onClick={() => setSelected([])}
+                    style={{
+                      fontSize: 12.5,
+                      color: c.textMuted,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontWeight: 500,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Deselect all
+                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => setBatchDeleteOpen(true)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "5px 12px",
+                        borderRadius: 7,
+                        border: `1px solid ${c.dangerSoft || "#FEE2E2"}`,
+                        background: c.dangerSoft || "#FEF2F2",
+                        color: c.danger || "#DC2626",
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <Trash2 size={13} />
+                      <span>Delete Selected ({selected.length})</span>
+                    </button>
+                  )}
+                </>
               )}
             </div>
 
@@ -1124,6 +1180,19 @@ export default function SuppliersPage() {
           message={`Delete ${supplierToDelete.supplierName}? This will remove the supplier details. This action cannot be undone.`}
           onClose={() => setSupplierToDelete(null)}
           onConfirm={handleDeleteConfirm}
+          c={c}
+        />
+      )}
+
+      {batchDeleteOpen && (
+        <ConfirmDeleteModal
+          title={`Delete ${selected.length} Selected Suppliers`}
+          itemName={`${selected.length} suppliers`}
+          itemType="suppliers"
+          message={`Are you sure you want to permanently delete the ${selected.length} selected supplier(s)? This action cannot be undone.`}
+          onClose={() => setBatchDeleteOpen(false)}
+          onConfirm={handleBatchDeleteSuppliers}
+          loading={batchDeleting}
           c={c}
         />
       )}

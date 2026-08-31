@@ -45,10 +45,18 @@ class FileFormat(enum.Enum):
     PDF = "PDF"
 
 
-# ----------------------- Enums for purchase order type ---------------------- #
-class POType(enum.Enum):
+# ----------------------- Enums for purchase order state --------------------- #
+class POStatus(enum.Enum):
     DRAFT = "Draft"
-    GENERATED = "Generated"
+    PENDING_APPROVAL = "Pending Approval"
+    APPROVED = "Approved"
+    PARTIALLY_RECEIVED = "Partially Received"
+    COMPLETED = "Completed"
+    CANCELLED = "Cancelled"
+
+
+# Legacy alias
+POType = POStatus
 
 
 # ----------------------- Enums for Audit action types ----------------------- #
@@ -78,10 +86,28 @@ class AuditAction(enum.Enum):
     ITEM_DEACTIVATE = "ITEM_DEACTIVATE"
     ITEM_REACTIVATE = "ITEM_REACTIVATE"
     ITEM_PRICE_UPDATE = "ITEM_PRICE_UPDATE"
+    ITEM_SUPPLIER_ADD = "ITEM_SUPPLIER_ADD"
+    ITEM_SUPPLIER_REMOVE = "ITEM_SUPPLIER_REMOVE"
+    ITEM_SUPPLIER_UPDATE = "ITEM_SUPPLIER_UPDATE"
+
+    # Stock & Transactions
+    STOCK_BATCH_CREATE = "STOCK_BATCH_CREATE"
+    STOCK_BATCH_ADJUST = "STOCK_BATCH_ADJUST"
+    TRANSACTION_RECORDED = "TRANSACTION_RECORDED"
+    PURCHASE_ORDER_CREATE = "PURCHASE_ORDER_CREATE"
+    PURCHASE_ORDER_STATUS_CHANGE = "PURCHASE_ORDER_STATUS_CHANGE"
 
 
 # ------------------------ Enums for Transaction types ----------------------- #
 class TransactionType(enum.Enum):
+    PURCHASE = "PURCHASE"
+    SOLD = "SOLD"
+    CUSTOMER_RETURN = "CUSTOMER_RETURN"
+    DAMAGED = "DAMAGED"
+    EXPIRED = "EXPIRED"
+    ADJUSTMENT_INCREASE = "ADJUSTMENT_INCREASE"
+    ADJUSTMENT_DECREASE = "ADJUSTMENT_DECREASE"
+    # Legacy aliases
     STOCK_IN = "STOCK_IN"
     STOCK_OUT = "STOCK_OUT"
 
@@ -91,6 +117,13 @@ class AlertStatus(enum.Enum):
     CRITICAL = "CRITICAL"  # stock == 0           (red)
     LOW_STOCK = "LOW_STOCK"  # 0 < stock <= restock (orange)
     RESOLVED = "RESOLVED"  # stock > restock       (green)
+
+
+# --------------------------- Item Stock Health Enum ------------------------- #
+class ItemHealthStatus(enum.Enum):
+    HEALTHY = "HEALTHY"
+    LOW_STOCK = "LOW_STOCK"
+    CRITICAL = "CRITICAL"
 
 
 # -------------------------------- User Model -------------------------------- #
@@ -115,7 +148,6 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(local_tz)
     )
-    # Withot lambda the time will actually be the time your server started
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(local_tz),
@@ -140,13 +172,9 @@ class User(Base):
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )
 
-    # back_populates use to sync both relationships, so we can access user from report and report from user
-    # in relationship need to match attribute name not table name or class name
-    # ForeignKey determine the 1:M relationship
 
-
+# ------------------------------- Category Model ----------------------------- #
 class Category(Base):
-
     __tablename__ = "categories"
 
     category_id: Mapped[uuid.UUID] = mapped_column(
@@ -164,14 +192,15 @@ class Category(Base):
         default=lambda: datetime.now(local_tz),
         onupdate=lambda: datetime.now(local_tz),
     )
+
     # Relationships
     items: Mapped[list["Item"]] = relationship(
         "Item", back_populates="category", passive_deletes=True
     )
 
 
+# ------------------------------- Supplier Model ----------------------------- #
 class Supplier(Base):
-
     __tablename__ = "suppliers"
 
     supplier_id: Mapped[uuid.UUID] = mapped_column(
@@ -200,111 +229,56 @@ class Supplier(Base):
     items: Mapped[list["Item"]] = relationship(
         "Item", back_populates="supplier", passive_deletes=True
     )
+    item_suppliers: Mapped[list["ItemSupplier"]] = relationship(
+        "ItemSupplier", back_populates="supplier", cascade="all, delete-orphan"
+    )
+    stock_batches: Mapped[list["StockBatch"]] = relationship(
+        "StockBatch", back_populates="supplier"
+    )
     purchaseorders: Mapped[list["PurchaseOrder"]] = relationship(
         "PurchaseOrder",
         back_populates="supplier",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    transactions: Mapped[list["Transaction"]] = relationship(
+        "Transaction", back_populates="supplier"
+    )
     stockalerts: Mapped[list["StockAlert"]] = relationship(
         "StockAlert", back_populates="supplier", passive_deletes=True
     )
 
 
-class Report(Base):
+# --------------------------------- Unit Model ------------------------------- #
+class Unit(Base):
+    __tablename__ = "units"
 
-    __tablename__ = "reports"
-
-    report_id: Mapped[uuid.UUID] = mapped_column(
+    unit_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    report_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    report_type: Mapped[ReportType] = mapped_column(Enum(ReportType), nullable=False)
-    generated_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.user_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    generated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
-    )
-    start_date: Mapped[date] = mapped_column(Date, nullable=False)
-    end_date: Mapped[date] = mapped_column(Date, nullable=False)
-    file_format: Mapped[FileFormat] = mapped_column(
-        Enum(FileFormat), nullable=False, default=FileFormat.PDF
-    )
-
-    # Realtionships
-    user: Mapped["User | None"] = relationship("User", back_populates="reports")
-
-
-class PurchaseOrder(Base):
-
-    __tablename__ = "purchase_orders"
-
-    po_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    supplier_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("suppliers.supplier_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.user_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    po_type: Mapped[POType] = mapped_column(Enum(POType), nullable=False)
+    unit_name: Mapped[str] = mapped_column(
+        String(50), nullable=False, unique=True, index=True
+    )  # e.g. Pieces, Kilograms, Liters, Meters
+    unit_symbol: Mapped[str] = mapped_column(
+        String(20), nullable=False, unique=True, index=True
+    )  # e.g. pcs, kg, L, m, box
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(local_tz)
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(local_tz),
+        onupdate=lambda: datetime.now(local_tz),
+    )
 
     # Relationships
-    user: Mapped["User | None"] = relationship(
-        "User", back_populates="purchaseorders", foreign_keys=[created_by]
-    )
-    supplier: Mapped["Supplier"] = relationship(
-        "Supplier", back_populates="purchaseorders"
-    )
-    purchaseorderitems: Mapped[list["PurchaseOrderItem"]] = relationship(
-        "PurchaseOrderItem",
-        back_populates="purchaseorder",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
+    items: Mapped[list["Item"]] = relationship("Item", back_populates="unit_rel")
 
 
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
-
-    log_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    # Nullable=True because a failed login or system-generated task might not have a valid user_id
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.user_id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    action: Mapped[AuditAction] = mapped_column(
-        Enum(AuditAction), nullable=False, index=True
-    )
-    # Human-readable summary (e.g., "Updated selling price of Item 'Laptop X' from $1000 to $1200")
-    description: Mapped[str] = mapped_column(String, nullable=False)
-    target_table: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=True)
-    old_value: Mapped[str | None] = mapped_column(String, nullable=True)
-    new_value: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(local_tz), index=True
-    )
-    # Relationships
-    user: Mapped["User | None"] = relationship("User", back_populates="auditlogs")
-
-
+# --------------------------------- Item Model ------------------------------- #
 class Item(Base):
-
     __tablename__ = "items"
 
     __table_args__ = (
@@ -336,10 +310,16 @@ class Item(Base):
         nullable=True,
         index=True,
     )
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("units.unit_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     quantity_in_stock: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     unit: Mapped[str] = mapped_column(
-        String(20), nullable=False
-    )  # Kg, Liters, Pieces, etc.
+        String(20), nullable=False, default="pcs"
+    )  # kg, pcs, m, L etc.
     cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     selling_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     reorder_level: Mapped[int] = mapped_column(
@@ -357,8 +337,15 @@ class Item(Base):
     )
 
     # Relationships
-    category: Mapped["Category"] = relationship("Category", back_populates="items")
-    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="items")
+    category: Mapped["Category | None"] = relationship("Category", back_populates="items")
+    supplier: Mapped["Supplier | None"] = relationship("Supplier", back_populates="items")
+    unit_rel: Mapped["Unit | None"] = relationship("Unit", back_populates="items")
+    item_suppliers: Mapped[list["ItemSupplier"]] = relationship(
+        "ItemSupplier", back_populates="item", cascade="all, delete-orphan"
+    )
+    stock_batches: Mapped[list["StockBatch"]] = relationship(
+        "StockBatch", back_populates="item", cascade="all, delete-orphan"
+    )
     purchaseorderitems: Mapped[list["PurchaseOrderItem"]] = relationship(
         "PurchaseOrderItem",
         back_populates="item",
@@ -378,9 +365,190 @@ class Item(Base):
         passive_deletes=True,
     )
 
+    @property
+    def health_status(self) -> ItemHealthStatus:
+        if self.quantity_in_stock <= 0:
+            return ItemHealthStatus.CRITICAL
+        elif self.quantity_in_stock <= self.reorder_level:
+            return ItemHealthStatus.LOW_STOCK
+        return ItemHealthStatus.HEALTHY
 
+
+# -------------------------- ItemSupplier (M:M Junction) ---------------------- #
+class ItemSupplier(Base):
+    __tablename__ = "item_suppliers"
+
+    __table_args__ = (
+        Index("idx_item_supplier_primary", "item_id", "is_primary"),
+    )
+
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("items.item_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.supplier_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    agreed_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    is_primary: Mapped[bool] = mapped_column(default=False, nullable=False)
+    supplier_sku: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(local_tz),
+        onupdate=lambda: datetime.now(local_tz),
+    )
+
+    # Relationships
+    item: Mapped["Item"] = relationship("Item", back_populates="item_suppliers")
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="item_suppliers")
+
+
+# ------------------------ StockBatch (Batch & Expiry) ----------------------- #
+class StockBatch(Base):
+    __tablename__ = "stock_batches"
+
+    __table_args__ = (
+        Index("idx_batches_item_supplier", "item_id", "supplier_id"),
+        Index("idx_batches_expiry", "expiry_date"),
+    )
+
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("items.item_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.supplier_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    po_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.po_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    batch_number: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    purchase_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    current_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    initial_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    received_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(local_tz),
+        onupdate=lambda: datetime.now(local_tz),
+    )
+
+    # Relationships
+    item: Mapped["Item"] = relationship("Item", back_populates="stock_batches")
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="stock_batches")
+    purchase_order: Mapped["PurchaseOrder | None"] = relationship(
+        "PurchaseOrder", back_populates="stock_batches"
+    )
+    transactions: Mapped[list["Transaction"]] = relationship(
+        "Transaction", back_populates="batch"
+    )
+
+
+# ---------------------------- PurchaseOrder Model --------------------------- #
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+
+    po_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.supplier_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[POStatus] = mapped_column(
+        Enum(POStatus), nullable=False, default=POStatus.DRAFT
+    )
+    po_type: Mapped[POStatus] = mapped_column(
+        Enum(POStatus), nullable=False, default=POStatus.DRAFT
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(local_tz),
+        onupdate=lambda: datetime.now(local_tz),
+    )
+
+    # Relationships
+    user: Mapped["User | None"] = relationship(
+        "User", back_populates="purchaseorders", foreign_keys=[created_by]
+    )
+    supplier: Mapped["Supplier"] = relationship(
+        "Supplier", back_populates="purchaseorders"
+    )
+    purchaseorderitems: Mapped[list["PurchaseOrderItem"]] = relationship(
+        "PurchaseOrderItem",
+        back_populates="purchaseorder",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    stock_batches: Mapped[list["StockBatch"]] = relationship(
+        "StockBatch", back_populates="purchase_order"
+    )
+
+
+# ------------------------- PurchaseOrderItem Model -------------------------- #
+class PurchaseOrderItem(Base):
+    __tablename__ = "purchase_order_items"
+
+    poi_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    po_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.po_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("items.item_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    # Relationships
+    purchaseorder: Mapped["PurchaseOrder"] = relationship(
+        "PurchaseOrder", back_populates="purchaseorderitems"
+    )
+    item: Mapped["Item"] = relationship("Item", back_populates="purchaseorderitems")
+
+
+# ----------------------------- Transaction Model ---------------------------- #
 class Transaction(Base):
-
     __tablename__ = "transactions"
 
     __table_args__ = (
@@ -400,6 +568,26 @@ class Transaction(Base):
         ForeignKey("items.item_id", ondelete="CASCADE"),
         nullable=False,
     )
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.supplier_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stock_batches.batch_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    po_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.po_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reference_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("transactions.transaction_id", ondelete="SET NULL"),
+        nullable=True,
+    )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.user_id", ondelete="SET NULL"),
@@ -409,20 +597,106 @@ class Transaction(Base):
         Enum(TransactionType), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    previous_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    new_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     transaction_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(local_tz), index=True
     )
-    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Realtionships
+    # Relationships
     user: Mapped["User | None"] = relationship("User", back_populates="transactions")
     item: Mapped["Item"] = relationship("Item", back_populates="transactions")
+    supplier: Mapped["Supplier | None"] = relationship("Supplier", back_populates="transactions")
+    batch: Mapped["StockBatch | None"] = relationship("StockBatch", back_populates="transactions")
+    reference_transaction: Mapped["Transaction | None"] = relationship(
+        "Transaction", remote_side=[transaction_id]
+    )
 
 
+# ------------------------------- Report Model ------------------------------- #
+class Report(Base):
+    __tablename__ = "reports"
+
+    report_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    report_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    report_type: Mapped[ReportType] = mapped_column(Enum(ReportType), nullable=False)
+    generated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    file_format: Mapped[FileFormat] = mapped_column(
+        Enum(FileFormat), nullable=False, default=FileFormat.PDF
+    )
+
+    # Relationships
+    user: Mapped["User | None"] = relationship("User", back_populates="reports")
+
+
+# ------------------------------ AuditLog Model ------------------------------ #
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    log_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    action: Mapped[AuditAction] = mapped_column(
+        Enum(AuditAction), nullable=False, index=True
+    )
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    target_table: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    old_value: Mapped[str | None] = mapped_column(String, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz), index=True
+    )
+
+    # Relationships
+    user: Mapped["User | None"] = relationship("User", back_populates="auditlogs")
+
+
+# ------------------------- PasswordResetToken Model ------------------------- #
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    token_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_used: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="password_reset_tokens")
+
+
+# ----------------------------- StockAlert Model ----------------------------- #
 class StockAlert(Base):
-
     __tablename__ = "stock_alerts"
 
     __table_args__ = (
@@ -465,52 +739,3 @@ class StockAlert(Base):
         "Supplier", back_populates="stockalerts"
     )
     item: Mapped["Item"] = relationship("Item", back_populates="stockalerts")
-
-
-class PurchaseOrderItem(Base):
-
-    __tablename__ = "purchase_order_items"
-
-    poi_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    po_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("purchase_orders.po_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    item_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("items.item_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
-    # Relationships
-    purchaseorder: Mapped["PurchaseOrder"] = relationship(
-        "PurchaseOrder", back_populates="purchaseorderitems"
-    )
-    item: Mapped["Item"] = relationship("Item", back_populates="purchaseorderitems")
-
-
-class PasswordResetToken(Base):
-    __tablename__ = "password_reset_tokens"
-
-    token_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.user_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    is_used: Mapped[bool] = mapped_column(default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(local_tz)
-    )
-
-    # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="password_reset_tokens")

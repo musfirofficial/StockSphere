@@ -1,949 +1,1489 @@
 "use client";
-import React, { useState, useEffect, useMemo, useRef } from "react";
+
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Plus,
-  ArrowLeft,
-  Trash2,
-  ChevronLeft,
-  ChevronRight,
   Search,
   X,
-  TrendingUp,
-  History,
+  Check,
+  Building2,
+  Package,
+  RotateCcw,
+  AlertTriangle,
+  Clock,
+  Sliders,
+  Calendar,
+  AlertCircle,
+  Filter,
+  CheckCircle,
+  ChevronDown,
+  ArrowLeft,
+  UserCircle,
+  ShoppingCart,
+  Truck,
+  FileText,
 } from "lucide-react";
 import { useTheme } from "../ThemeContext";
-import {
-  useData,
-  Transaction,
-  getItemCurrentQty,
-} from "../DataContext";
+import { useData, Item } from "../DataContext";
 import { isReadOnly } from "@/lib/roles";
-import { Pagination, SearchBar, DataTable, DataTableColumn } from "@/components/ui";
+import { apiFetch } from "@/lib/api";
+import { Pagination } from "@/components/ui";
 
+// ── Transaction Types ──────────────────────────────────────
+export type TxType =
+  | "PURCHASE"
+  | "SOLD"
+  | "CUSTOMER_RETURN"
+  | "DAMAGED"
+  | "EXPIRED"
+  | "ADJUSTMENT_INCREASE"
+  | "ADJUSTMENT_DECREASE";
 
-type BulkRow = { item: string; type: "Stock in" | "Stock out"; qty: number };
+interface TransactionRecord {
+  transaction_id: string;
+  item_id: string;
+  item_name: string;
+  sku: string;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  batch_id?: string | null;
+  batch_number?: string | null;
+  batch_selling_price?: number | null;
+  po_id?: string | null;
+  reference_transaction_id?: string | null;
+  transaction_type: TxType;
+  quantity: number;
+  previous_quantity: number;
+  new_quantity: number;
+  unit_price?: number | null;
+  reason?: string | null;
+  note?: string | null;
+  user_id?: string | null;
+  user_name: string;
+  user_full_name?: string | null;
+  transaction_date: string;
+}
 
+interface StockBatchOption {
+  batch_id: string;
+  batch_number: string;
+  current_quantity: number;
+  purchase_price: number;
+  selling_price?: number | null;
+  expiry_date?: string | null;
+  supplier_id: string;
+  supplier_name?: string;
+}
+
+interface ApprovedPOOption {
+  po_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  status: string;
+  items: {
+    item_id: string;
+    item_name: string;
+    sku: string;
+    unit: string;
+    quantity: number;
+    quantity_received: number;
+    unit_price: number;
+  }[];
+}
+
+// ── Sleek Minimal Transaction Type Indicator ───────────────
+function TransactionTypeIndicator({ type }: { type: TxType }) {
+  const map: Record<TxType, { color: string; label: string }> = {
+    PURCHASE: { color: "#2E7D32", label: "Purchase Receipt" },
+    SOLD: { color: "#1E40AF", label: "Sale" },
+    CUSTOMER_RETURN: { color: "#7C3AED", label: "Customer Return" },
+    DAMAGED: { color: "#DC2626", label: "Damaged Stock" },
+    EXPIRED: { color: "#B78103", label: "Expired Stock" },
+    ADJUSTMENT_INCREASE: { color: "#2E7D32", label: "Adjustment (+)" },
+    ADJUSTMENT_DECREASE: { color: "#DC2626", label: "Adjustment (-)" },
+  };
+  const t = map[type] || { color: "#64748B", label: type };
+
+  return (
+    <span
+      style={{
+        fontSize: 12.5,
+        fontWeight: 500,
+        color: t.color,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: t.color }} />
+      {t.label}
+    </span>
+  );
+}
+
+// ============================================================================
+// Main Transactions Page
+// ============================================================================
 export default function TransactionsPage() {
   const { c } = useTheme();
-  const { transactionList, itemList, loggedInUser, recordTransactions, setHeaderActions, fetchTransactions, fetchItems, refreshTransactions, refreshItems } = useData();
-
-  useEffect(() => {
-    fetchTransactions();
-    fetchItems();
-  }, []);
-
-  // Derive read-only mode from role (Auditor & Sales cannot create transactions)
+  const { itemList, supplierList, loggedInUser, refreshItems, fetchItems } = useData();
   const readOnly = isReadOnly(loggedInUser?.role ?? "", "transactions");
 
-  // ── Read view state ──
+  const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingItems, setLoadingItems] = useState(false);
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("ALL");
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+
+  // Dedicated Full-Page Transaction Details State
+  const [selectedTx, setSelectedTx] = useState<TransactionRecord | null>(null);
+
+  // Dedicated Full-Page Create Transaction View State
+  const [isCreating, setIsCreating] = useState(false);
+  const [activeTab, setActiveTab] = useState<TxType>("SOLD");
+  const [formError, setFormError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Form Fields
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [itemBatches, setItemBatches] = useState<StockBatchOption[]>([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+  const [selectedBatchId, setSelectedBatchId] = useState("");
+  const [txQuantity, setTxQuantity] = useState("1");
+  const [customUnitPrice, setCustomUnitPrice] = useState("");
+  const [txReason, setTxReason] = useState("");
+  const [txNote, setTxNote] = useState("");
+
+  // Purchase Specific (Approved POs)
+  const [approvedPOs, setApprovedPOs] = useState<ApprovedPOOption[]>([]);
+  const [selectedPOId, setSelectedPOId] = useState("");
+  const [poReceiveItems, setPoReceiveItems] = useState<{
+    [itemId: string]: { quantity: number; batchNumber: string; expiryDate: string; sellingPrice: string };
+  }>({});
+
+  // Customer Return Specific
+  const [soldTransactions, setSoldTransactions] = useState<TransactionRecord[]>([]);
+  const [selectedSoldTxId, setSelectedSoldTxId] = useState("");
+
+  // Pagination
   const [page, setPage] = useState(1);
-  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
-  const PAGE = 8;
+  const PAGE_SIZE = 12;
 
-  // ── Add view state ──
-  const [isAdding, setIsAdding] = useState(false);
-  const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
-  const [itemSearch, setItemSearch] = useState("");
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  // recording state
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordProgress, setRecordProgress] = useState(0);
-  const [recordError, setRecordError] = useState<string | null>(null);
-  const ddRef = useRef<HTMLDivElement>(null);
-
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ddRef.current && !ddRef.current.contains(e.target as Node))
-        setShowSuggestions(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  useEffect(() => {
-    // Read-only roles never see the New transaction button
-    if (readOnly) {
-      setHeaderActions(null);
-      return;
+  // Load all transactions and items
+  const loadTransactions = async () => {
+    setLoading(true);
+    try {
+      const data = await apiFetch<TransactionRecord[]>("/transaction/");
+      setTransactions(data || []);
+    } catch (err) {
+      setTransactions([]);
+    } finally {
+      setLoading(false);
     }
-    if (isAdding) {
-      setHeaderActions(null);
-      return;
-    }
-    setHeaderActions(
-      <button
-        onClick={() => setIsAdding(true)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          background: c.accent,
-          color: "#fff",
-          border: "none",
-          padding: "8px 14px",
-          borderRadius: 8,
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: "pointer",
-          fontFamily: "inherit",
-        }}
-      >
-        <Plus size={15} /> New transaction
-      </button>
-    );
-    return () => setHeaderActions(null);
-  }, [isAdding, c, setHeaderActions, readOnly]);
-
-  // ── Filtered list (no Adjustment) ──
-  const filtered = useMemo(
-    () =>
-      transactionList.filter((t) => {
-        if (t.type !== "Stock in" && t.type !== "Stock out") return false;
-        const q = search.toLowerCase();
-        return (
-          !q ||
-          t.item.toLowerCase().includes(q) ||
-          t.user.toLowerCase().includes(q) ||
-          t.id.toLowerCase().includes(q)
-        );
-      }),
-    [transactionList, search]
-  );
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
-  const pageRows = filtered.slice((page - 1) * PAGE, page * PAGE);
-
-  // Active items from real itemList for suggestions
-  const suggestions = useMemo(() => {
-    const q = itemSearch.toLowerCase();
-    if (!q) return [];
-    return itemList
-      .filter((i) => i.active && i.itemName.toLowerCase().includes(q))
-      .slice(0, 20);
-  }, [itemSearch, itemList]);
-
-  const addRow = (item: string) => {
-    if (!bulkRows.find((r) => r.item === item))
-      setBulkRows((p) => [...p, { item, type: "Stock in", qty: 1 }]);
-    setItemSearch("");
-    setShowSuggestions(false);
   };
-  const removeRow = (i: number) =>
-    setBulkRows((p) => p.filter((_, idx) => idx !== i));
-  const updateRow = (i: number, f: Partial<BulkRow>) =>
-    setBulkRows((p) => p.map((r, idx) => (idx === i ? { ...r, ...f } : r)));
 
-  const handleRecord = async () => {
-    if (!bulkRows.length) return;
-    if (bulkRows.some((r) => r.qty <= 0)) {
-      setRecordError("All quantities must be greater than zero.");
+  useEffect(() => {
+    loadTransactions();
+    if (itemList.length === 0) {
+      setLoadingItems(true);
+      fetchItems().finally(() => setLoadingItems(false));
+    }
+  }, [fetchItems, itemList.length]);
+
+  useEffect(() => {
+    if (isCreating && itemList.length === 0) {
+      setLoadingItems(true);
+      fetchItems().finally(() => setLoadingItems(false));
+    }
+  }, [isCreating, fetchItems, itemList.length]);
+
+  // Filtered transactions
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((t) => {
+      const q = search.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        t.item_name.toLowerCase().includes(q) ||
+        t.sku.toLowerCase().includes(q) ||
+        t.user_name.toLowerCase().includes(q) ||
+        (t.batch_number && t.batch_number.toLowerCase().includes(q)) ||
+        (t.supplier_name && t.supplier_name.toLowerCase().includes(q));
+
+      const matchType = typeFilter === "ALL" || t.transaction_type === typeFilter;
+      return matchSearch && matchType;
+    });
+  }, [transactions, search, typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
+  const pageTransactions = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredTransactions.slice(start, start + PAGE_SIZE);
+  }, [filteredTransactions, page]);
+
+  // Load batches when item is selected in form
+  useEffect(() => {
+    if (!selectedItemId || activeTab === "PURCHASE" || activeTab === "CUSTOMER_RETURN") {
+      setItemBatches([]);
+      setSelectedBatchId("");
       return;
     }
-    setIsRecording(true);
-    setRecordProgress(0);
-    setRecordError(null);
+    setLoadingBatches(true);
+    apiFetch<StockBatchOption[]>(`/transaction/batches/${selectedItemId}`)
+      .then((data) => {
+        setItemBatches(data || []);
+        if (data && data.length > 0) {
+          setSelectedBatchId(data[0].batch_id);
+          const chosenItem = itemList.find((i) => i.id === selectedItemId);
+          const price = data[0].selling_price ?? chosenItem?.sellingPrice ?? "";
+          setCustomUnitPrice(price ? String(price) : "");
+        } else {
+          setSelectedBatchId("");
+          setCustomUnitPrice("");
+        }
+      })
+      .catch(() => {
+        setItemBatches([]);
+        setSelectedBatchId("");
+      })
+      .finally(() => {
+        setLoadingBatches(false);
+      });
+  }, [selectedItemId, activeTab, itemList]);
 
-    // Patch recordTransactions to update progress
-    // We call it and then handle the result
-    const result = await recordTransactions(bulkRows);
+  // When selected batch changes in SOLD tab, update customUnitPrice
+  const handleBatchChange = (batchId: string) => {
+    setSelectedBatchId(batchId);
+    const chosenBatch = itemBatches.find((b) => b.batch_id === batchId);
+    const chosenItem = itemList.find((i) => i.id === selectedItemId);
+    const price = chosenBatch?.selling_price ?? chosenItem?.sellingPrice ?? "";
+    setCustomUnitPrice(price ? String(price) : "");
+  };
 
-    setIsRecording(false);
-    if (result.success) {
-      setBulkRows([]);
-      setIsAdding(false);
-      setPage(1);
-      // Refresh transaction list and item stock from backend
-      refreshTransactions();
-      refreshItems();
+  // Load approved POs when tab is PURCHASE
+  useEffect(() => {
+    if (isCreating && activeTab === "PURCHASE") {
+      apiFetch<ApprovedPOOption[]>("/purchas-orders/")
+        .then((data) => {
+          const approved = (data || []).filter(
+            (po) => po.status === "Approved" || po.status === "Partially Received"
+          );
+          setApprovedPOs(approved);
+          if (approved.length > 0) {
+            setSelectedPOId(approved[0].po_id);
+          }
+        })
+        .catch(() => setApprovedPOs([]));
+    }
+  }, [isCreating, activeTab]);
+
+  // Initialize PO Receive Items
+  useEffect(() => {
+    if (!selectedPOId) {
+      setPoReceiveItems({});
+      return;
+    }
+    const po = approvedPOs.find((p) => p.po_id === selectedPOId);
+    if (!po) return;
+
+    const init: any = {};
+    po.items.forEach((item) => {
+      const remaining = Math.max(0, item.quantity - item.quantity_received);
+      const matchedItem = itemList.find((i) => i.id === item.item_id);
+      init[item.item_id] = {
+        quantity: remaining,
+        batchNumber: `BATCH-${item.sku}-${new Date().getFullYear()}`,
+        expiryDate: "",
+        sellingPrice: matchedItem?.sellingPrice ? String(matchedItem.sellingPrice) : "",
+      };
+    });
+    setPoReceiveItems(init);
+  }, [selectedPOId, approvedPOs, itemList]);
+
+  // Load SOLD transactions when tab is CUSTOMER_RETURN
+  useEffect(() => {
+    if (isCreating && activeTab === "CUSTOMER_RETURN") {
+      apiFetch<TransactionRecord[]>("/transaction/")
+        .then((data) => {
+          const sold = (data || []).filter((t) => t.transaction_type === "SOLD");
+          setSoldTransactions(sold);
+          if (sold.length > 0) {
+            setSelectedSoldTxId(sold[0].transaction_id);
+          }
+        })
+        .catch(() => setSoldTransactions([]));
+    }
+  }, [isCreating, activeTab]);
+
+  // Handle Submit Transaction
+  const handleSubmitTransaction = async () => {
+    setFormError("");
+    setSubmitting(true);
+
+    try {
+      if (activeTab === "PURCHASE") {
+        if (!selectedPOId) throw new Error("Please select an approved purchase order.");
+        const po = approvedPOs.find((p) => p.po_id === selectedPOId);
+        if (!po) throw new Error("Invalid purchase order.");
+
+        const linesToReceive = Object.entries(poReceiveItems)
+          .filter(([_, v]) => v.quantity > 0 && v.batchNumber.trim().length > 0)
+          .map(([itemId, v]) => ({
+            item_id: itemId,
+            quantity: Number(v.quantity),
+            batch_number: v.batchNumber.trim(),
+            expiry_date: v.expiryDate || null,
+            selling_price: v.sellingPrice ? Number(v.sellingPrice) : null,
+          }));
+
+        if (linesToReceive.length === 0) {
+          throw new Error("Please specify quantity and batch number for at least one item line.");
+        }
+
+        await apiFetch(`/purchas-orders/${selectedPOId}/receive`, {
+          method: "POST",
+          body: JSON.stringify({
+            items: linesToReceive,
+            note: txNote || "Goods received against PO",
+          }),
+        });
+      } else if (activeTab === "SOLD") {
+        if (!selectedItemId) throw new Error("Please select an item to sell.");
+        const qty = parseInt(txQuantity, 10);
+        if (isNaN(qty) || qty <= 0) throw new Error("Quantity must be at least 1.");
+        const unitPrice = customUnitPrice ? parseFloat(customUnitPrice) : null;
+
+        await apiFetch("/transaction/sell", {
+          method: "POST",
+          body: JSON.stringify({
+            item_id: selectedItemId,
+            batch_id: selectedBatchId || null,
+            quantity: qty,
+            unit_price: unitPrice,
+            note: txNote || null,
+          }),
+        });
+      } else if (activeTab === "CUSTOMER_RETURN") {
+        if (!selectedSoldTxId) throw new Error("Please select the original sale transaction.");
+        const qty = parseInt(txQuantity, 10);
+        if (isNaN(qty) || qty <= 0) throw new Error("Return quantity must be at least 1.");
+
+        await apiFetch("/transaction/customer-return", {
+          method: "POST",
+          body: JSON.stringify({
+            sold_transaction_id: selectedSoldTxId,
+            quantity: qty,
+            reason: txReason || "Customer return",
+            note: txNote || null,
+          }),
+        });
+      } else if (activeTab === "DAMAGED") {
+        if (!selectedItemId) throw new Error("Please select an item.");
+        const qty = parseInt(txQuantity, 10);
+        if (isNaN(qty) || qty <= 0) throw new Error("Quantity must be at least 1.");
+
+        await apiFetch("/transaction/damaged", {
+          method: "POST",
+          body: JSON.stringify({
+            item_id: selectedItemId,
+            batch_id: selectedBatchId || null,
+            quantity: qty,
+            reason: txReason || "Damaged stock write-off",
+            note: txNote || null,
+          }),
+        });
+      } else if (activeTab === "EXPIRED") {
+        if (!selectedItemId) throw new Error("Please select an item.");
+        const qty = parseInt(txQuantity, 10);
+        if (isNaN(qty) || qty <= 0) throw new Error("Quantity must be at least 1.");
+
+        await apiFetch("/transaction/expired", {
+          method: "POST",
+          body: JSON.stringify({
+            item_id: selectedItemId,
+            batch_id: selectedBatchId || null,
+            quantity: qty,
+            reason: txReason || "Expired stock disposal",
+            note: txNote || null,
+          }),
+        });
+      } else if (activeTab === "ADJUSTMENT_INCREASE" || activeTab === "ADJUSTMENT_DECREASE") {
+        if (!selectedItemId) throw new Error("Please select an item.");
+        const qty = parseInt(txQuantity, 10);
+        if (isNaN(qty) || qty <= 0) throw new Error("Adjustment quantity must be at least 1.");
+        if (!txReason.trim()) throw new Error("Reason is mandatory for stock adjustments.");
+
+        await apiFetch("/transaction/adjust", {
+          method: "POST",
+          body: JSON.stringify({
+            item_id: selectedItemId,
+            batch_id: selectedBatchId || null,
+            transaction_type: activeTab,
+            quantity: qty,
+            reason: txReason.trim(),
+            note: txNote || null,
+          }),
+        });
+      }
+
+      // Success Reset
+      setIsCreating(false);
+      setSelectedItemId("");
+      setSelectedBatchId("");
+      setTxQuantity("1");
+      setCustomUnitPrice("");
+      setTxReason("");
+      setTxNote("");
+      setSelectedPOId("");
+      setSelectedSoldTxId("");
+
+      await refreshItems();
+      await loadTransactions();
+    } catch (err: any) {
+      setFormError(err.message || "Failed to record transaction.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 1. DEDICATED FULL-PAGE CREATE TRANSACTION VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  if (isCreating) {
+    const selectedItemObj = itemList.find((i) => i.id === selectedItemId);
+    const selectedBatchObj = itemBatches.find((b) => b.batch_id === selectedBatchId);
+    const currentStock = selectedItemObj?.quantity ?? 0;
+    const qtyNum = parseInt(txQuantity, 10) || 0;
+
+    let projectedStock = currentStock;
+    if (activeTab === "PURCHASE" || activeTab === "CUSTOMER_RETURN" || activeTab === "ADJUSTMENT_INCREASE") {
+      projectedStock = currentStock + qtyNum;
     } else {
-      setRecordError(
-        result.completed > 0
-          ? `Recorded ${result.completed} of ${bulkRows.length}. Failed on: ${result.error}`
-          : `Failed: ${result.error}`
-      );
+      projectedStock = Math.max(0, currentStock - qtyNum);
     }
-  };
 
-  const typeBadge = (type: string) => ({
-    bg: type === "Stock in" ? c.accentSoft : c.dangerSoft,
-    fg: type === "Stock in" ? c.accent : c.danger,
-  });
-
-  // ─────────────────────────────────────────────────────────────
-  // READ VIEW
-  // ─────────────────────────────────────────────────────────────
-  if (!isAdding)
     return (
-      <div
-        style={{ display: "flex", height: "100%", gap: 20, overflow: "hidden" }}
-      >
-        {/* Table */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minWidth: 0,
-            height: "100%",
-          }}
-        >
-          <DataTable
-            c={c}
-            columns={[
-              {
-                key: "item",
-                header: "Item",
-                render: (t) => <span style={{ fontWeight: 600 }}>{t.item}</span>,
-              },
-              {
-                key: "type",
-                header: "Type",
-                render: (t) => {
-                  const { bg, fg } = typeBadge(t.type);
-                  return (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        padding: "3px 9px",
-                        borderRadius: 999,
-                        background: bg,
-                        color: fg,
-                      }}
-                    >
-                      {t.type}
-                    </span>
-                  );
-                },
-              },
-              {
-                key: "qty",
-                header: "Quantity",
-                render: (t) => (
-                  <span
-                    style={{
-                      fontWeight: 600,
-                      color: t.qty >= 0 ? c.accent : c.danger,
-                    }}
-                  >
-                    {t.qty > 0 ? `+${t.qty}` : t.qty}
-                  </span>
-                ),
-              },
-              {
-                key: "user",
-                header: "User",
-                render: (t) => <span style={{ color: c.textMuted }}>{t.user}</span>,
-              },
-              {
-                key: "date",
-                header: "Date",
-                render: (t) => <span style={{ color: c.textFaint }}>{t.date}</span>,
-              },
-            ]}
-            data={pageRows}
-            keyExtractor={(t) => t.id}
-            selectedRowId={selectedTx?.id}
-            onRowClick={(t) => setSelectedTx(t)}
-            emptyMessage="No transactions found."
-            search={{
-              value: search,
-              onChange: (val) => {
-                setSearch(val);
-                setPage(1);
-              },
-              placeholder: "Search by item, user or ID…",
-              maxWidth: 280,
-            }}
-            pagination={{
-              page,
-              totalPages,
-              totalCount: filtered.length,
-              pageSize: PAGE,
-              itemLabel: "transactions",
-              onPageChange: setPage,
-            }}
-          />
+      <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 1000, margin: "0 auto", width: "100%" }}>
+        {/* Top Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button
+              onClick={() => setIsCreating(false)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <ArrowLeft size={14} /> Back to Transactions
+            </button>
+            <div>
+              <h1 style={{ fontSize: 18, fontWeight: 700, color: c.text, margin: 0 }}>
+                Record Inventory Transaction
+              </h1>
+              <p style={{ fontSize: 12.5, color: c.textMuted, margin: "2px 0 0" }}>
+                Select movement classification, configure item batch details, and post the entry to the ledger.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setIsCreating(false)}
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmitTransaction}
+              disabled={submitting}
+              style={{
+                padding: "8px 18px",
+                borderRadius: 8,
+                border: "none",
+                background: c.accent,
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: submitting ? "default" : "pointer",
+                opacity: submitting ? 0.7 : 1,
+              }}
+            >
+              {submitting ? "Processing..." : "Submit Transaction"}
+            </button>
+          </div>
         </div>
 
-        {/* Detail panel */}
-        {selectedTx && (
+        {formError && (
           <div
             style={{
-              width: 340,
-              flexShrink: 0,
-              background: c.surface,
-              border: `1px solid ${c.border}`,
-              borderRadius: 14,
+              padding: "11px 16px",
+              background: c.dangerSoft || "#FEF2F2",
+              color: c.danger || "#DC2626",
+              borderRadius: 8,
+              fontSize: 13,
               display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
+              alignItems: "center",
+              gap: 8,
+              border: `1px solid ${c.dangerSoft || "#FEE2E2"}`,
             }}
           >
-            <div
-              style={{
-                padding: "16px 20px",
-                borderBottom: `1px solid ${c.border}`,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <span
+            <AlertCircle size={15} />
+            <span>{formError}</span>
+          </div>
+        )}
+
+        {/* Transaction Type Tabs */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+            gap: 8,
+            background: c.surfaceMuted,
+            padding: 6,
+            borderRadius: 10,
+            border: `1px solid ${c.border}`,
+          }}
+        >
+          {[
+            { id: "SOLD", label: "Customer Sale", icon: ShoppingCart },
+            { id: "PURCHASE", label: "Receive PO", icon: Truck },
+            { id: "CUSTOMER_RETURN", label: "Customer Return", icon: RotateCcw },
+            { id: "DAMAGED", label: "Damaged Stock", icon: AlertTriangle },
+            { id: "EXPIRED", label: "Expired Stock", icon: Clock },
+            { id: "ADJUSTMENT_INCREASE", label: "Adjustment (+)", icon: Plus },
+            { id: "ADJUSTMENT_DECREASE", label: "Adjustment (-)", icon: Sliders },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isSelected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id as TxType);
+                  setFormError("");
+                }}
                 style={{
-                  fontSize: 14,
-                  fontWeight: 600,
                   display: "flex",
                   alignItems: "center",
-                  gap: 7,
-                }}
-              >
-                <History size={15} color={c.accent} /> Transaction Detail
-              </span>
-              <button
-                onClick={() => setSelectedTx(null)}
-                style={{
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  color: c.textMuted,
-                  display: "flex",
-                }}
-              >
-                <X size={17} />
-              </button>
-            </div>
-            <div
-              style={{
-                flex: 1,
-                overflowY: "auto",
-                padding: 20,
-                display: "flex",
-                flexDirection: "column",
-                gap: 16,
-              }}
-            >
-              {[
-                { label: "ID", value: selectedTx.id },
-                { label: "Item", value: selectedTx.item },
-                { label: "User", value: selectedTx.user },
-                { label: "Date", value: selectedTx.date },
-              ].map(({ label, value }) => (
-                <div key={label}>
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      color: c.textFaint,
-                      fontWeight: 500,
-                      letterSpacing: "0.04em",
-                      marginBottom: 3,
-                    }}
-                  >
-                    {label.toUpperCase()}
-                  </div>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{value}</div>
-                </div>
-              ))}
-              <div>
-                <div
-                  style={{
-                    fontSize: 10.5,
-                    color: c.textFaint,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    marginBottom: 3,
-                  }}
-                >
-                  TYPE
-                </div>
-                <span
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    padding: "3px 9px",
-                    borderRadius: 999,
-                    background: typeBadge(selectedTx.type).bg,
-                    color: typeBadge(selectedTx.type).fg,
-                  }}
-                >
-                  {selectedTx.type}
-                </span>
-              </div>
-              <div>
-                <div
-                  style={{
-                    fontSize: 10.5,
-                    color: c.textFaint,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    marginBottom: 3,
-                  }}
-                >
-                  QUANTITY CHANGED
-                </div>
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: selectedTx.qty >= 0 ? c.accent : c.danger,
-                  }}
-                >
-                  {selectedTx.qty > 0 ? `+${selectedTx.qty}` : selectedTx.qty}{" "}
-                  units
-                </div>
-              </div>
-
-              {/* Audit block */}
-              <div
-                style={{
-                  padding: "14px 16px",
-                  borderRadius: 10,
-                  background: c.surfaceMuted,
-                  border: `1px solid ${c.border}`,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    color: c.textMuted,
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  INVENTORY AUDIT
-                </div>
-                <div
-                  style={{ display: "flex", justifyContent: "space-between" }}
-                >
-                  <span style={{ fontSize: 12.5, color: c.textMuted }}>
-                    Previous Quantity
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>
-                    {selectedTx.prevQty ?? "—"}
-                  </span>
-                </div>
-                <div style={{ height: 1, background: c.border }} />
-                <div
-                  style={{ display: "flex", justifyContent: "space-between" }}
-                >
-                  <span style={{ fontSize: 12.5, color: c.textMuted }}>
-                    New Quantity
-                  </span>
-                  <span
-                    style={{ fontSize: 13.5, fontWeight: 700, color: c.accent }}
-                  >
-                    {selectedTx.newQty ?? "—"}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div
-              style={{
-                padding: "12px 18px",
-                borderTop: `1px solid ${c.border}`,
-                display: "flex",
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                onClick={() => setSelectedTx(null)}
-                style={{
-                  padding: "7px 16px",
+                  justifyContent: "center",
+                  gap: 6,
+                  padding: "8px 10px",
                   borderRadius: 7,
-                  border: `1px solid ${c.border}`,
-                  background: c.surface,
-                  color: c.text,
+                  border: isSelected ? `1px solid ${c.accent}` : "1px solid transparent",
+                  background: isSelected ? c.surface : "transparent",
+                  color: isSelected ? c.accent : c.textMuted,
                   fontSize: 12.5,
-                  fontWeight: 500,
+                  fontWeight: isSelected ? 600 : 500,
                   cursor: "pointer",
                   fontFamily: "inherit",
                 }}
               >
-                Close
+                <Icon size={14} />
+                <span>{tab.label}</span>
               </button>
+            );
+          })}
+        </div>
+
+        {/* Main Content Layout */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+          {/* 1. PURCHASE RECEIVING WORKFLOW */}
+          {activeTab === "PURCHASE" && (
+            <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "20px" }}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600, color: c.text, display: "block", marginBottom: 6 }}>
+                  Select Approved Purchase Order *
+                </label>
+                <select
+                  value={selectedPOId}
+                  onChange={(e) => setSelectedPOId(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${c.border}`,
+                    background: c.inputBg,
+                    color: c.text,
+                    fontSize: 13.5,
+                    outline: "none",
+                  }}
+                >
+                  <option value="">-- Choose Approved PO --</option>
+                  {approvedPOs.map((po) => (
+                    <option key={po.po_id} value={po.po_id}>
+                      PO-{po.po_id.slice(0, 8).toUpperCase()} ({po.supplier_name}) — Status: {po.status}
+                    </option>
+                  ))}
+                </select>
+                {approvedPOs.length === 0 && (
+                  <div style={{ fontSize: 12, color: c.textMuted, marginTop: 6 }}>
+                    No approved purchase orders awaiting receipt. Approve a PO first in the Purchase Orders module.
+                  </div>
+                )}
+              </div>
+
+              {selectedPOId && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 8 }}>
+                    PO Line Items & Batch Assignment
+                  </div>
+                  <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                      <thead>
+                        <tr style={{ background: c.surfaceMuted, color: c.textFaint, textAlign: "left" }}>
+                          <th style={{ padding: "9px 12px" }}>Item & SKU</th>
+                          <th style={{ padding: "9px 12px", width: 90 }}>Order Qty</th>
+                          <th style={{ padding: "9px 12px", width: 100 }}>Receive Now</th>
+                          <th style={{ padding: "9px 12px", width: 160 }}>Batch Lot # *</th>
+                          <th style={{ padding: "9px 12px", width: 140 }}>Expiry Date</th>
+                          <th style={{ padding: "9px 12px", width: 130 }}>Batch Sell Price ($)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {approvedPOs
+                          .find((p) => p.po_id === selectedPOId)
+                          ?.items.map((item) => {
+                            const entry = poReceiveItems[item.item_id] || {
+                              quantity: 0,
+                              batchNumber: "",
+                              expiryDate: "",
+                              sellingPrice: "",
+                            };
+                            return (
+                              <tr key={item.item_id} style={{ borderTop: `1px solid ${c.border}` }}>
+                                <td style={{ padding: "10px 12px" }}>
+                                  <div style={{ fontWeight: 600, color: c.text }}>{item.item_name}</div>
+                                  <div style={{ fontSize: 11.5, color: c.textMuted, fontFamily: "monospace" }}>{item.sku}</div>
+                                </td>
+                                <td style={{ padding: "10px 12px", color: c.textMuted }}>
+                                  {item.quantity} {item.unit}
+                                </td>
+                                <td style={{ padding: "10px 12px" }}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={entry.quantity}
+                                    onChange={(e) =>
+                                      setPoReceiveItems({
+                                        ...poReceiveItems,
+                                        [item.item_id]: { ...entry, quantity: parseInt(e.target.value, 10) || 0 },
+                                      })
+                                    }
+                                    style={{
+                                      width: 75,
+                                      padding: "6px 8px",
+                                      borderRadius: 6,
+                                      border: `1px solid ${c.border}`,
+                                      fontSize: 12.5,
+                                      background: c.inputBg,
+                                      color: c.text,
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: "10px 12px" }}>
+                                  <input
+                                    value={entry.batchNumber}
+                                    onChange={(e) =>
+                                      setPoReceiveItems({
+                                        ...poReceiveItems,
+                                        [item.item_id]: { ...entry, batchNumber: e.target.value },
+                                      })
+                                    }
+                                    placeholder="Batch Lot #"
+                                    style={{
+                                      width: "100%",
+                                      padding: "6px 8px",
+                                      borderRadius: 6,
+                                      border: `1px solid ${c.border}`,
+                                      fontSize: 12.5,
+                                      background: c.inputBg,
+                                      color: c.text,
+                                      fontFamily: "monospace",
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: "10px 12px" }}>
+                                  <input
+                                    type="date"
+                                    value={entry.expiryDate}
+                                    onChange={(e) =>
+                                      setPoReceiveItems({
+                                        ...poReceiveItems,
+                                        [item.item_id]: { ...entry, expiryDate: e.target.value },
+                                      })
+                                    }
+                                    style={{
+                                      width: "100%",
+                                      padding: "5px 8px",
+                                      borderRadius: 6,
+                                      border: `1px solid ${c.border}`,
+                                      fontSize: 12,
+                                      background: c.inputBg,
+                                      color: c.text,
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: "10px 12px" }}>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="0.00"
+                                    value={entry.sellingPrice}
+                                    onChange={(e) =>
+                                      setPoReceiveItems({
+                                        ...poReceiveItems,
+                                        [item.item_id]: { ...entry, sellingPrice: e.target.value },
+                                      })
+                                    }
+                                    style={{
+                                      width: 95,
+                                      padding: "6px 8px",
+                                      borderRadius: 6,
+                                      border: `1px solid ${c.border}`,
+                                      fontSize: 12.5,
+                                      background: c.inputBg,
+                                      color: c.text,
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ marginTop: 14 }}>
+                    <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                      Receiving Audit Notes
+                    </label>
+                    <input
+                      value={txNote}
+                      onChange={(e) => setTxNote(e.target.value)}
+                      placeholder="e.g., Goods received inspected and verified in warehouse."
+                      style={{
+                        width: "100%",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: `1px solid ${c.border}`,
+                        background: c.inputBg,
+                        color: c.text,
+                        fontSize: 13,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+
+          {/* 2. CUSTOMER RETURN WORKFLOW */}
+          {activeTab === "CUSTOMER_RETURN" && (
+            <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "20px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 12.5, fontWeight: 600, color: c.text, display: "block", marginBottom: 6 }}>
+                  Select Original Sale Transaction *
+                </label>
+                <select
+                  value={selectedSoldTxId}
+                  onChange={(e) => setSelectedSoldTxId(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${c.border}`,
+                    background: c.inputBg,
+                    color: c.text,
+                    fontSize: 13.5,
+                    outline: "none",
+                  }}
+                >
+                  <option value="">-- Choose Sale Transaction --</option>
+                  {soldTransactions.map((tx) => (
+                    <option key={tx.transaction_id} value={tx.transaction_id}>
+                      {tx.item_name} ({tx.sku}) · Qty Sold: {tx.quantity} · ${Number(tx.unit_price || 0).toFixed(2)} · {new Date(tx.transaction_date).toLocaleDateString()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                    Return Quantity *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={txQuantity}
+                    onChange={(e) => setTxQuantity(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${c.border}`,
+                      background: c.inputBg,
+                      color: c.text,
+                      fontSize: 13.5,
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                    Return Reason
+                  </label>
+                  <input
+                    value={txReason}
+                    onChange={(e) => setTxReason(e.target.value)}
+                    placeholder="e.g., Wrong size / Customer changed mind"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${c.border}`,
+                      background: c.inputBg,
+                      color: c.text,
+                      fontSize: 13.5,
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                  Inspection / Additional Notes
+                </label>
+                <input
+                  value={txNote}
+                  onChange={(e) => setTxNote(e.target.value)}
+                  placeholder="e.g., Item verified intact in unopened packaging, returned to stock."
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${c.border}`,
+                    background: c.inputBg,
+                    color: c.text,
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 3. ITEM & BATCH WORKFLOW (SALE, DAMAGE, EXPIRED, ADJUSTMENTS) */}
+          {activeTab !== "PURCHASE" && activeTab !== "CUSTOMER_RETURN" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }}>
+              {/* Left Column: Form Fields */}
+              <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "20px", display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 600, color: c.text, display: "block", marginBottom: 6 }}>
+                    Select Inventory Item *
+                  </label>
+                  <select
+                    value={selectedItemId}
+                    onChange={(e) => setSelectedItemId(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${c.border}`,
+                      background: c.inputBg,
+                      color: c.text,
+                      fontSize: 13.5,
+                      outline: "none",
+                    }}
+                  >
+                    <option value="">
+                      {loadingItems ? "-- Loading inventory items... --" : "-- Choose Item --"}
+                    </option>
+                    {itemList.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.itemName} ({i.sku}) — In Stock: {i.quantity} {i.unit}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedItemId && (
+                  <>
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 600, color: c.text, display: "block", marginBottom: 6 }}>
+                        Stock Batch / Lot {activeTab === "SOLD" ? "(FIFO Selection)" : ""}
+                      </label>
+                      {loadingBatches ? (
+                        <div style={{ fontSize: 12, color: c.textMuted }}>Loading batches...</div>
+                      ) : (
+                        <select
+                          value={selectedBatchId}
+                          onChange={(e) => handleBatchChange(e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "9px 12px",
+                            borderRadius: 8,
+                            border: `1px solid ${c.border}`,
+                            background: c.inputBg,
+                            color: c.text,
+                            fontSize: 13,
+                            outline: "none",
+                          }}
+                        >
+                          {itemBatches.length === 0 ? (
+                            <option value="">-- No specific batch (General Stock) --</option>
+                          ) : (
+                            itemBatches.map((b) => (
+                              <option key={b.batch_id} value={b.batch_id}>
+                                Batch: {b.batch_number} (Qty: {b.current_quantity} | Cost: ${Number(b.purchase_price).toFixed(2)} | Sell: ${Number(b.selling_price || selectedItemObj?.sellingPrice || 0).toFixed(2)})
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      )}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: activeTab === "SOLD" ? "1fr 1fr" : "1fr", gap: 14 }}>
+                      <div>
+                        <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                          Quantity ({selectedItemObj?.unit || "units"}) *
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max={activeTab === "SOLD" || activeTab === "DAMAGED" || activeTab === "EXPIRED" ? currentStock : undefined}
+                          value={txQuantity}
+                          onChange={(e) => setTxQuantity(e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            border: `1px solid ${c.border}`,
+                            background: c.inputBg,
+                            color: c.text,
+                            fontSize: 13.5,
+                          }}
+                        />
+                      </div>
+
+                      {activeTab === "SOLD" && (
+                        <div>
+                          <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                            Selling Price / Unit ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={customUnitPrice}
+                            onChange={(e) => setCustomUnitPrice(e.target.value)}
+                            placeholder={selectedItemObj ? String(selectedItemObj.sellingPrice) : "0.00"}
+                            style={{
+                              width: "100%",
+                              padding: "8px 12px",
+                              borderRadius: 8,
+                              border: `1px solid ${c.border}`,
+                              background: c.inputBg,
+                              color: c.text,
+                              fontSize: 13.5,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {(activeTab === "DAMAGED" ||
+                      activeTab === "EXPIRED" ||
+                      activeTab === "ADJUSTMENT_INCREASE" ||
+                      activeTab === "ADJUSTMENT_DECREASE") && (
+                      <div>
+                        <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                          Reason / Audit Justification *
+                        </label>
+                        <input
+                          value={txReason}
+                          onChange={(e) => setTxReason(e.target.value)}
+                          placeholder={
+                            activeTab.includes("ADJUSTMENT")
+                              ? "e.g., Annual physical stock count reconciliation variance"
+                              : "e.g., Water damage during storage"
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            border: `1px solid ${c.border}`,
+                            background: c.inputBg,
+                            color: c.text,
+                            fontSize: 13.5,
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label style={{ fontSize: 12.5, fontWeight: 500, color: c.textMuted, display: "block", marginBottom: 5 }}>
+                        Additional Notes / Reference
+                      </label>
+                      <input
+                        value={txNote}
+                        onChange={(e) => setTxNote(e.target.value)}
+                        placeholder="e.g., Invoice #INV-8891 or Warehouse Bay #3"
+                        style={{
+                          width: "100%",
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${c.border}`,
+                          background: c.inputBg,
+                          color: c.text,
+                          fontSize: 13,
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Right Column: Live Summary Preview */}
+              <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "20px", display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: c.text, borderBottom: `1px solid ${c.border}`, paddingBottom: 8 }}>
+                  Transaction Impact Preview
+                </div>
+
+                {selectedItemObj ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: c.textMuted }}>Target Item</div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: c.text }}>{selectedItemObj.itemName}</div>
+                      <div style={{ fontSize: 12, color: c.textMuted, fontFamily: "monospace" }}>{selectedItemObj.sku}</div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, background: c.surfaceMuted, padding: 12, borderRadius: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>Current Stock</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: c.text }}>
+                          {currentStock} {selectedItemObj.unit}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>Post-Movement</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: projectedStock <= 0 ? "#DC2626" : "#2E7D32" }}>
+                          {projectedStock} {selectedItemObj.unit}
+                        </div>
+                      </div>
+                    </div>
+
+                    {activeTab === "SOLD" && (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${c.border}`, paddingTop: 10 }}>
+                        <span style={{ fontSize: 12.5, color: c.textMuted }}>Total Sale Value:</span>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: c.text }}>
+                          ${(qtyNum * (customUnitPrice ? parseFloat(customUnitPrice) : Number(selectedItemObj.sellingPrice || 0))).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+
+                    <div style={{ fontSize: 12, color: c.textMuted, marginTop: 4 }}>
+                      Operator: <strong style={{ color: "#2563EB" }}>@{loggedInUser?.username || "admin"}</strong>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ padding: "30px 10px", textAlign: "center", color: c.textFaint, fontSize: 13 }}>
+                    Select an item to view live stock impact and verification metrics.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
+  }
 
-  // ─────────────────────────────────────────────────────────────
-  // ADD / BATCH ENTRY VIEW
-  // ─────────────────────────────────────────────────────────────
-  return (
-    <div
-      style={{
-        background: c.surface,
-        border: `1px solid ${c.border}`,
-        borderRadius: 14,
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        overflow: "hidden",
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          padding: "16px 20px",
-          borderBottom: `1px solid ${c.border}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          flexShrink: 0,
-        }}
-      >
-        <button
-          onClick={() => {
-            setIsAdding(false);
-            setBulkRows([]);
-          }}
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 8,
-            border: `1px solid ${c.border}`,
-            background: c.surface,
-            color: c.text,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-          }}
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>
-            New Batch Transaction
-          </div>
-          <div style={{ fontSize: 11.5, color: c.textFaint, marginTop: 1 }}>
-            Operator:{" "}
-            <strong style={{ color: c.textMuted }}>{loggedInUser?.fullName ?? "You"}</strong>
+  // ════════════════════════════════════════════════════════════════════════════
+  // 2. DEDICATED FULL-PAGE TRANSACTION DETAILS VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  if (selectedTx) {
+    const isPositive =
+      selectedTx.transaction_type === "PURCHASE" ||
+      selectedTx.transaction_type === "CUSTOMER_RETURN" ||
+      selectedTx.transaction_type === "ADJUSTMENT_INCREASE";
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* Top Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button
+              onClick={() => setSelectedTx(null)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.surface,
+                color: c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <ArrowLeft size={14} /> Back to Transactions
+            </button>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h1 style={{ fontSize: 18, fontWeight: 700, color: c.text, margin: 0 }}>
+                  TX-{selectedTx.transaction_id.slice(0, 8).toUpperCase()}
+                </h1>
+                <TransactionTypeIndicator type={selectedTx.transaction_type} />
+              </div>
+              <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 4 }}>
+                Recorded on {new Date(selectedTx.transaction_date).toLocaleString()}
+              </div>
+            </div>
           </div>
         </div>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 11.5,
-            color: c.textMuted,
-            padding: "3px 10px",
-            borderRadius: 6,
-            background: c.surfaceMuted,
-            border: `1px solid ${c.border}`,
-          }}
-        >
-          {bulkRows.length} items
-        </span>
-      </div>
 
-      {/* Item search bar */}
-      <div
-        style={{
-          padding: "14px 20px",
-          borderBottom: `1px solid ${c.border}`,
-          background: c.surfaceMuted,
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ maxWidth: 480, position: "relative" }} ref={ddRef}>
+        {/* Overview Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+          {/* Item & Batch Card */}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Item & Sourcing</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              {selectedTx.item_name}
+            </div>
+            <div style={{ fontSize: 12, color: c.textMuted, fontFamily: "monospace", marginTop: 2 }}>
+              {selectedTx.sku}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12.5, color: c.textMuted, display: "flex", flexDirection: "column", gap: 3 }}>
+              <div>Supplier: <strong style={{ color: c.text }}>{selectedTx.supplier_name || "—"}</strong></div>
+              <div>Batch Lot: <strong style={{ color: c.text, fontFamily: "monospace" }}>{selectedTx.batch_number || "—"}</strong></div>
+            </div>
+          </div>
+
+          {/* Stock Quantity Movement Card */}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Quantity Movement</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: isPositive ? "#2E7D32" : "#DC2626", marginTop: 4 }}>
+              {isPositive ? `+${selectedTx.quantity}` : `-${selectedTx.quantity}`} units
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12.5, color: c.textMuted }}>
+              Before: <strong style={{ color: c.text }}>{selectedTx.previous_quantity}</strong> → After: <strong style={{ color: c.text }}>{selectedTx.new_quantity}</strong>
+            </div>
+          </div>
+
+          {/* Price & Financials Card */}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Pricing & Valuation</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: c.text, marginTop: 4 }}>
+              {selectedTx.unit_price ? `$${Number(selectedTx.unit_price).toFixed(2)}` : "—"}
+            </div>
+            <div style={{ fontSize: 12, color: c.textMuted, marginTop: 2 }}>Unit Price</div>
+            <div style={{ marginTop: 10, fontSize: 12.5, color: c.textMuted }}>
+              Total Value: <strong style={{ color: c.text }}>
+                {selectedTx.unit_price ? `$${(selectedTx.quantity * Number(selectedTx.unit_price)).toFixed(2)}` : "—"}
+              </strong>
+            </div>
+          </div>
+
+          {/* Operator Audit Card */}
+          <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 500 }}>Operator & Audit</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#2563EB", marginTop: 4 }}>
+              @{selectedTx.user_name}
+            </div>
+            <div style={{ fontSize: 12, color: c.textMuted, marginTop: 2 }}>
+              {selectedTx.user_full_name || "System Operator"}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 12, color: c.textMuted }}>
+              ID: <span style={{ fontFamily: "monospace" }}>{selectedTx.user_id ? selectedTx.user_id.slice(0, 8) : "SYSTEM"}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Remarks Card */}
+        <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, padding: "20px" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 12 }}>
+            Transaction Remarks & References
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+            <div>
+              <div style={{ fontSize: 12, color: c.textMuted }}>Reason</div>
+              <div style={{ fontSize: 13.5, color: c.text, marginTop: 4 }}>
+                {selectedTx.reason || "Standard inventory stock movement."}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: c.textMuted }}>Notes / Memo</div>
+              <div style={{ fontSize: 13.5, color: c.text, marginTop: 4 }}>
+                {selectedTx.note || "No additional notes recorded."}
+              </div>
+            </div>
+            {selectedTx.po_id && (
+              <div>
+                <div style={{ fontSize: 12, color: c.textMuted }}>Linked Purchase Order</div>
+                <div style={{ fontSize: 13.5, color: c.accent, fontFamily: "monospace", marginTop: 4 }}>
+                  PO-{selectedTx.po_id.slice(0, 8).toUpperCase()}
+                </div>
+              </div>
+            )}
+            {selectedTx.reference_transaction_id && (
+              <div>
+                <div style={{ fontSize: 12, color: c.textMuted }}>Reference Sale Transaction</div>
+                <div style={{ fontSize: 13.5, color: c.accent, fontFamily: "monospace", marginTop: 4 }}>
+                  TX-{selectedTx.reference_transaction_id.slice(0, 8).toUpperCase()}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 3. MAIN TRANSACTIONS TABLE VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Search & Filter Toolbar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 260, maxWidth: 360 }}>
           <div
             style={{
               display: "flex",
               alignItems: "center",
               gap: 8,
-              padding: "9px 13px",
-              borderRadius: 9,
+              padding: "7px 12px",
+              borderRadius: 8,
               border: `1px solid ${c.border}`,
-              background: c.surface,
+              background: c.inputBg,
+              width: "100%",
             }}
           >
             <Search size={14} color={c.textFaint} />
             <input
-              value={itemSearch}
+              value={search}
               onChange={(e) => {
-                setItemSearch(e.target.value);
-                setShowSuggestions(true);
+                setSearch(e.target.value);
+                setPage(1);
               }}
-              onFocus={() => setShowSuggestions(true)}
-              placeholder="Search and add inventory items…"
+              placeholder="Search item, SKU, operator, batch..."
               style={{
                 border: "none",
                 outline: "none",
                 background: "transparent",
                 color: c.text,
                 fontSize: 13,
-                fontFamily: "inherit",
                 width: "100%",
+                fontFamily: "inherit",
               }}
             />
-            {itemSearch && (
-              <button
-                onClick={() => setItemSearch("")}
-                style={{
-                  border: "none",
-                  background: "none",
-                  cursor: "pointer",
-                  color: c.textFaint,
-                  display: "flex",
-                }}
-              >
-                <X size={13} />
-              </button>
-            )}
           </div>
-          {showSuggestions && suggestions.length > 0 && (
-            <div
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Type Filter */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setTypeMenuOpen(!typeMenuOpen)}
               style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                left: 0,
-                right: 0,
-                background: c.surface,
-                border: `1px solid ${c.border}`,
-                borderRadius: 9,
-                maxHeight: 200,
-                overflowY: "auto",
-                zIndex: 100,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${typeFilter !== "ALL" ? c.accent : c.border}`,
+                background: typeFilter !== "ALL" ? c.accentSoft : c.surface,
+                color: typeFilter !== "ALL" ? c.accent : c.text,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "inherit",
               }}
             >
-              {suggestions.map((item) => {
-                const added = bulkRows.some((r) => r.item === item.itemName);
-                const stockQty = getItemCurrentQty(item.itemName, transactionList, itemList);
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => !added && addRow(item.itemName)}
-                    style={{
-                      padding: "10px 14px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      borderBottom: `1px solid ${c.border}`,
-                      cursor: added ? "default" : "pointer",
-                      opacity: added ? 0.45 : 1,
-                      fontSize: 12.5,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!added)
-                        e.currentTarget.style.background = c.surfaceMuted;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <span style={{ fontWeight: 500 }}>{item.itemName}</span>
-                    <div
-                      style={{ display: "flex", gap: 10, alignItems: "center" }}
-                    >
-                      <span style={{ fontSize: 11, color: c.textFaint }}>
-                        Stock: {stockQty} {item.unit}
-                      </span>
-                      {added && (
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: c.accent,
-                            fontWeight: 600,
-                          }}
-                        >
-                          Added
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+              <Filter size={13} />
+              {typeFilter === "ALL" ? "All Types" : typeFilter}
+              <ChevronDown size={13} />
+            </button>
 
-      {/* Rows table */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {bulkRows.length === 0 ? (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              height: "100%",
-              minHeight: 220,
-              gap: 10,
-              color: c.textFaint,
-            }}
-          >
-            <Search size={28} strokeWidth={1.5} />
-            <span style={{ fontSize: 13.5, fontWeight: 500 }}>
-              No items added yet
-            </span>
-            <span style={{ fontSize: 12, color: c.textFaint }}>
-              Use the search bar above to add items to this batch.
-            </span>
-          </div>
-        ) : (
-          <table
-            style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}
-          >
-            <thead>
-              <tr
+            {typeMenuOpen && (
+              <div
                 style={{
-                  color: c.textFaint,
-                  textAlign: "left",
-                  background: c.surfaceMuted,
-                  borderBottom: `1px solid ${c.border}`,
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 4,
+                  width: 190,
+                  background: c.surface,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 8,
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+                  zIndex: 20,
+                  padding: 4,
                 }}
               >
                 {[
-                  "Item",
-                  "Transaction Type",
-                  "Quantity",
-                  "Current Stock",
-                  "Projected",
-                  "",
-                ].map((h) => (
-                  <th
-                    key={h}
+                  { id: "ALL", label: "All Types" },
+                  { id: "SOLD", label: "Sale" },
+                  { id: "PURCHASE", label: "Purchase Receipt" },
+                  { id: "CUSTOMER_RETURN", label: "Customer Return" },
+                  { id: "DAMAGED", label: "Damaged Stock" },
+                  { id: "EXPIRED", label: "Expired Stock" },
+                  { id: "ADJUSTMENT_INCREASE", label: "Adjustment (+)" },
+                  { id: "ADJUSTMENT_DECREASE", label: "Adjustment (-)" },
+                ].map((opt) => (
+                  <div
+                    key={opt.id}
+                    onClick={() => {
+                      setTypeFilter(opt.id);
+                      setTypeMenuOpen(false);
+                      setPage(1);
+                    }}
                     style={{
-                      padding: "10px 20px",
-                      fontWeight: 500,
-                      fontSize: 11,
-                      letterSpacing: "0.02em",
+                      padding: "7px 10px",
+                      borderRadius: 6,
+                      fontSize: 12.5,
+                      cursor: "pointer",
+                      background: typeFilter === opt.id ? c.surfaceMuted : "transparent",
+                      color: typeFilter === opt.id ? c.accent : c.text,
                     }}
                   >
-                    {h}
-                  </th>
+                    {opt.label}
+                  </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* New Transaction Button */}
+          {!readOnly && (
+            <button
+              onClick={() => setIsCreating(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: c.accent,
+                color: "#fff",
+                border: "none",
+                padding: "8px 14px",
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <Plus size={15} /> New Transaction
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Transactions Table */}
+      <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ color: c.textFaint, textAlign: "left", background: c.surfaceMuted }}>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Type</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Item & SKU</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Batch #</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Qty Change</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Operator</th>
+                <th style={{ padding: "10px 14px", fontWeight: 500 }}>Date</th>
               </tr>
             </thead>
             <tbody>
-              {bulkRows.map((row, i) => {
-                const current = getItemCurrentQty(row.item, transactionList, itemList);
-                const qty = Number(row.qty) || 0;
-                const projected =
-                  row.type === "Stock in" ? current + qty : current - qty;
-                return (
-                  <tr
-                    key={row.item}
-                    style={{
-                      borderBottom: `1px solid ${c.border}`,
-                      background: c.surface,
-                    }}
-                  >
-                    <td style={{ padding: "12px 20px", fontWeight: 600 }}>
-                      {row.item}
-                    </td>
-                    <td style={{ padding: "12px 20px" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          borderRadius: 7,
-                          border: `1px solid ${c.border}`,
-                          background: c.inputBg,
-                          padding: 2,
-                          width: "fit-content",
-                        }}
-                      >
-                        {(["Stock in", "Stock out"] as const).map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => updateRow(i, { type: t })}
-                            style={{
-                              border: "none",
-                              padding: "5px 12px",
-                              borderRadius: 5,
-                              background:
-                                row.type === t
-                                  ? t === "Stock in"
-                                    ? c.accent
-                                    : c.danger
-                                  : "transparent",
-                              color: row.type === t ? "#fff" : c.textMuted,
-                              fontSize: 11.5,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            {t === "Stock in" ? "In" : "Out"}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                    <td style={{ padding: "12px 20px" }}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={row.qty || ""}
-                        onChange={(e) =>
-                          updateRow(i, { qty: parseInt(e.target.value) || 0 })
-                        }
-                        style={{
-                          width: 90,
-                          padding: "6px 10px",
-                          borderRadius: 6,
-                          border: `1px solid ${c.border}`,
-                          background: c.inputBg,
-                          color: c.text,
-                          fontSize: 13,
-                          fontWeight: 600,
-                          outline: "none",
-                          fontFamily: "inherit",
-                        }}
-                      />
-                    </td>
-                    <td
+              {loading ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: "center", color: c.textMuted }}>
+                    Loading transaction logs...
+                  </td>
+                </tr>
+              ) : pageTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: "center", color: c.textFaint }}>
+                    No transactions found.
+                  </td>
+                </tr>
+              ) : (
+                pageTransactions.map((t) => {
+                  const isPositive =
+                    t.transaction_type === "PURCHASE" ||
+                    t.transaction_type === "CUSTOMER_RETURN" ||
+                    t.transaction_type === "ADJUSTMENT_INCREASE";
+
+                  return (
+                    <tr
+                      key={t.transaction_id}
+                      onClick={() => setSelectedTx(t)}
                       style={{
-                        padding: "12px 20px",
-                        color: c.textMuted,
-                        fontSize: 12.5,
+                        borderTop: `1px solid ${c.border}`,
+                        cursor: "pointer",
                       }}
                     >
-                      {current}
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px 20px",
-                        fontWeight: 600,
-                        fontSize: 12.5,
-                        color: projected < 0 ? c.danger : c.accent,
-                      }}
-                    >
-                      {projected}
-                    </td>
-                    <td style={{ padding: "12px 20px" }}>
-                      <button
-                        onClick={() => removeRow(i)}
-                        style={{
-                          border: "none",
-                          background: "none",
-                          cursor: "pointer",
-                          color: c.textFaint,
-                          display: "flex",
-                          padding: 4,
-                        }}
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.color = c.danger)
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.color = c.textFaint)
-                        }
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      <td style={{ padding: "12px 14px" }}>
+                        <TransactionTypeIndicator type={t.transaction_type} />
+                      </td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <div style={{ fontWeight: 600, color: c.text }}>{t.item_name}</div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted, fontFamily: "monospace" }}>{t.sku}</div>
+                      </td>
+                      <td style={{ padding: "12px 14px", color: c.textMuted, fontFamily: "monospace" }}>
+                        {t.batch_number || "—"}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontWeight: 700, color: isPositive ? "#2E7D32" : "#DC2626" }}>
+                        {isPositive ? `+${t.quantity}` : `-${t.quantity}`}
+                      </td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <span style={{ fontWeight: 600, color: "#2563EB", fontSize: 12.5 }}>
+                          @{t.user_name}
+                        </span>
+                      </td>
+                      <td style={{ padding: "12px 14px", color: c.textFaint }}>
+                        {new Date(t.transaction_date).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
+        </div>
+
+        {filteredTransactions.length > PAGE_SIZE && (
+          <div style={{ borderTop: `1px solid ${c.border}` }}>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={filteredTransactions.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+              c={c}
+            />
+          </div>
         )}
-      </div>
-
-      {/* Error Banner */}
-      {recordError && (
-        <div
-          style={{
-            margin: "0 20px",
-            padding: "10px 14px",
-            borderRadius: 8,
-            background: c.dangerSoft,
-            border: `1px solid ${c.danger}`,
-            color: c.danger,
-            fontSize: 12.5,
-            fontWeight: 500,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexShrink: 0,
-          }}
-        >
-          <span>{recordError}</span>
-          <button
-            onClick={() => setRecordError(null)}
-            style={{ border: "none", background: "none", cursor: "pointer", color: c.danger, display: "flex" }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
-      {/* Footer */}
-      <div
-        style={{
-          padding: "16px 20px",
-          borderTop: `1px solid ${c.border}`,
-          background: c.surface,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontSize: 12.5, color: c.textMuted }}>
-          {bulkRows.length > 0 && (
-            <>
-              {bulkRows.length} items ·{" "}
-              {bulkRows.reduce((a, r) => a + (Number(r.qty) || 0), 0)} total
-              units
-            </>
-          )}
-        </span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => {
-              setIsAdding(false);
-              setBulkRows([]);
-            }}
-            style={{
-              padding: "9px 16px",
-              borderRadius: 8,
-              border: `1px solid ${c.border}`,
-              background: c.surface,
-              color: c.text,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleRecord}
-            disabled={bulkRows.length === 0 || isRecording}
-            style={{
-              padding: "9px 18px",
-              borderRadius: 8,
-              border: "none",
-              background: c.accent,
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: bulkRows.length === 0 || isRecording ? "not-allowed" : "pointer",
-              fontFamily: "inherit",
-              opacity: bulkRows.length === 0 || isRecording ? 0.5 : 1,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              minWidth: 160,
-              justifyContent: "center",
-            }}
-          >
-            <TrendingUp size={14} />
-            {isRecording
-              ? `Recording ${recordProgress}/${bulkRows.length}…`
-              : "Record Transactions"}
-          </button>
-        </div>
       </div>
     </div>
   );

@@ -20,7 +20,6 @@ export type NavKey =
   | "suppliers"
   | "items"
   | "transactions"
-  | "stock_alerts"
   | "purchase_orders"
   | "reports"
   | "audit_logs";
@@ -34,7 +33,6 @@ export const SIDEBAR_TABS_BY_ROLE: Record<string, NavKey[]> = {
     "suppliers",
     "items",
     "transactions",
-    "stock_alerts",
     "purchase_orders",
     "reports",
     "audit_logs",
@@ -45,7 +43,6 @@ export const SIDEBAR_TABS_BY_ROLE: Record<string, NavKey[]> = {
     "suppliers",
     "items",
     "transactions",
-    "stock_alerts",
     "purchase_orders",
   ],
   Auditor: [
@@ -54,7 +51,6 @@ export const SIDEBAR_TABS_BY_ROLE: Record<string, NavKey[]> = {
     "suppliers",
     "items",
     "transactions",
-    "stock_alerts",
     "reports",
   ],
   Sales: [
