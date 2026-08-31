@@ -87,6 +87,7 @@ graph TB
     Route_Controllers --> Services_Layer
     Services_Layer --> AsyncEngine
     AsyncEngine --> Database
+
 ```
 
 ---
@@ -441,6 +442,7 @@ sequenceDiagram
 
     RefreshRoute-->>AuthDep: HTTP 200 OK with fresh_access_token
     AuthDep->>App: In-memory token renewed and retry original query
+
 ```
 
 ---

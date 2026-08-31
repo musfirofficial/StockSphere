@@ -17,7 +17,7 @@ This document details the exact business rules, computational algorithms, state 
 ### 2.1 Health Status Classification Algorithm
 Stock levels are continuously evaluated against item-specific thresholds whenever an inventory transaction or goods receipt occurs:
 
-$$\text{Health Status}(Q, R) = \begin{cases} \mathbf{CRITICAL} & \text{if } Q \le 0 \\ \mathbf{LOW\_STOCK} & \text{if } 0 < Q \le R \\ \mathbf{HEALTHY} & \text{if } Q > R \end{cases}$$
+$$\text{Health Status}(Q, R) = \begin{cases} \text{CRITICAL} & \text{if } Q \le 0 \\ \text{LOW STOCK} & \text{if } 0 < Q \le R \\ \text{HEALTHY} & \text{if } Q > R \end{cases}$$
 
 Where:
 - $Q =$ Current Stock Balance (`items.quantity_in_stock`)
@@ -40,14 +40,16 @@ Where:
   SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP 
   WHERE item_id = :item_id AND status = 'ACTIVE';
   ```
-- **Mean Time to Resolve (MTTR):** Evaluated as $\text{MTTR} = \text{AVG}(\text{resolved\_at} - \text{created\_at})$ across all resolved alerts within a reporting period.
+- **Mean Time to Resolve (MTTR):** Evaluated across all resolved alerts within a reporting period:
+
+$$\text{MTTR} = \text{Average}(\text{Resolved Timestamp} - \text{Created Timestamp})$$
 
 ### 2.4 Replenishment Capital Projection Formula
 For all items in `CRITICAL` or `LOW_STOCK` status:
 
-$$\text{Restock Qty} = \begin{cases} \text{reorder\_quantity} & \text{if } \text{reorder\_quantity} > 0 \\ \max(1, \text{reorder\_level} \times 2 - Q) & \text{otherwise} \end{cases}$$
+$$\text{Restock Qty} = \begin{cases} \text{Reorder Quantity} & \text{if } \text{Reorder Quantity} > 0 \\ \max(1, \text{Reorder Level} \times 2 - Q) & \text{otherwise} \end{cases}$$
 
-$$\text{Estimated Restock Capital} = \sum (\text{Restock Qty}_i \times \text{cost\_price}_i)$$
+$$\text{Estimated Restock Capital} = \sum (\text{Restock Qty}_i \times \text{Cost Price}_i)$$
 
 ---
 
@@ -129,8 +131,8 @@ Whenever inventory arrives via Purchase Order receiving or direct purchase:
 
 | Starting State | Target State | Trigger Action | Required Role | Preconditions |
 | :--- | :--- | :--- | :--- | :--- |
-| *None* | `Draft` | Create PO | `ADMIN`, `INVENTORY_MANAGER` | Active supplier, $\ge 1$ line item. |
-| `Draft` | `Submitted` | Submit for Review | `INVENTORY_MANAGER` | Line items valid and $> 0$ total cost. |
+| *None* | `Draft` | Create PO | `ADMIN`, `INVENTORY_MANAGER` | Active supplier, at least 1 line item. |
+| `Draft` | `Submitted` | Submit for Review | `INVENTORY_MANAGER` | Line items valid and total cost $> 0$. |
 | `Draft` | `Cancelled` | Discard PO | `ADMIN`, `INVENTORY_MANAGER` | None. |
 | `Submitted` | `Approved` | Approve PO | `ADMIN` | Admin verification of budget/quantities. |
 | `Submitted` | `Cancelled` | Reject PO | `ADMIN` | Cancellation reason logged. |
@@ -179,9 +181,9 @@ Every inventory modification must be classified under one of 7 standard movement
 ### 7.1 Mathematical Invariant
 At all times and across all operations:
 
-$$\text{items.quantity\_in\_stock} = \sum_{b \in \text{StockBatches}} b.\text{current\_quantity}$$
+$$\text{Total Stock Quantity} = \sum_{b \in \text{Batches}} \text{Batch Quantity}_b$$
 
-$$\text{items.quantity\_in\_stock} \ge 0 \quad (\text{Strict Negative Stock Prohibition})$$
+$$\text{Total Stock Quantity} \ge 0 \quad (\text{Strict Negative Stock Prohibition})$$
 
 ---
 
@@ -198,17 +200,17 @@ $$\text{items.quantity\_in\_stock} \ge 0 \quad (\text{Strict Negative Stock Proh
 ```
 
 1. **Overall Inventory Summary (`OVERALL_SUMMARY`):**
-   - $\text{Total Stock Worth (Cost)} = \sum (\text{quantity\_in\_stock}_i \times \text{cost\_price}_i)$
-   - $\text{Total Retail Value} = \sum (\text{quantity\_in\_stock}_i \times \text{selling\_price}_i)$
-   - $\text{Projected Gross Profit} = \text{Total Retail Value} - \text{Total Stock Worth}$
+   - $\text{Total Stock Cost} = \sum (\text{Stock Quantity}_i \times \text{Cost Price}_i)$
+   - $\text{Total Retail Value} = \sum (\text{Stock Quantity}_i \times \text{Selling Price}_i)$
+   - $\text{Projected Gross Profit} = \text{Total Retail Value} - \text{Total Stock Cost}$
    - $\text{Sell-Through Rate} = \frac{\text{Outflow Units}}{\text{Inflow Units} + \text{Opening Stock}} \times 100$
 
 2. **Stock Alerts & Replenishment (`LOW_STOCK`):**
    - Out-of-Stock count ($Q \le 0$), Low-Stock count ($0 < Q \le R$), MTTR, and itemized primary supplier sourcing schedule.
 
 3. **Category Valuation & Margins (`CATEGORY_WISE`):**
-   - Category inventory share $\% = \frac{\text{Category Stock Units}}{\text{Total Stock Units}} \times 100$
-   - Category Gross Margin $\% = \frac{\text{Retail Worth} - \text{Cost Worth}}{\text{Retail Worth}} \times 100$
+   - $\text{Category Inventory Share } \% = \frac{\text{Category Stock Units}}{\text{Total Stock Units}} \times 100$
+   - $\text{Category Gross Margin } \% = \frac{\text{Retail Worth} - \text{Cost Worth}}{\text{Retail Worth}} \times 100$
 
 4. **Transaction Audit Ledger (`TRANSACTION`):**
    - Chronological ledger with total inflow units, total outflow units, net stock change, sales revenue, procurement spend, and `@operator_username` attribution.
@@ -223,7 +225,9 @@ $$\text{items.quantity\_in\_stock} \ge 0 \quad (\text{Strict Negative Stock Proh
      - **Non-Moving:** $0$ outflow units in period.
 
 6. **Supplier Sourcing & Spend Scorecard (`SUPPLIER`):**
-   - Total purchase spend, total purchase orders, completed vs. pending POs, and Fulfillment Rate $\% = \frac{\text{Completed POs}}{\text{Total POs}} \times 100$.
+   - Total purchase spend, total purchase orders, completed vs. pending POs, and:
+   
+$$\text{Fulfillment Rate } \% = \frac{\text{Completed POs}}{\text{Total POs}} \times 100$$
 
 ---
 
