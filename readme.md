@@ -3,7 +3,7 @@
 > **Enterprise Inventory, Procurement & Supply Chain Operations Platform**
 
 StockSphere is a modern, transaction-backed inventory, procurement, and warehouse operations management platform designed to eliminate operational blind spots, automate replenishment workflows, prevent stockouts, and enforce strict role-based audit governance. Built with **Next.js 16 (React 19)** and **FastAPI (Python 3.11+)** with asynchronous **SQLAlchemy 2.0**, StockSphere delivers high-density enterprise data visibility, batch lot tracking, multi-tier supplier sourcing, and chart-free decision-ready reporting.
-![alt text](image.png)
+
 
 ---
 
@@ -46,7 +46,7 @@ StockSphere is a centralized operations platform that synchronizes physical inve
 
 ## 2. Screenshot & Visual Overview
 
-<!-- Add project screenshot here -->
+![alt text](image.png)
 
 ![StockSphere Dashboard Screenshot](docs/screenshot.png)
 
